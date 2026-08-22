@@ -5,8 +5,10 @@ a HID descriptor fixup, three small kernel/userspace patches, and a fan sensor
 module. Each fix lives in its own directory under [`patch/`](patch/) with its
 own README, measurements, and installer.
 
-> **This fork** adds support for the Ultra 5 338H SKU and for stock Arch /
-> Omarchy (the original was developed on CachyOS). Changes:
+> **This fork** targets the **Ultra 5 338H** SKU with the **M1050** DMI
+> revision (`product_version` = M1050; upstream's unit was an Ultra X9 388H
+> with M1010) and stock Arch / Omarchy (the original was developed on CachyOS).
+> Changes:
 > * [`patch/fingerprint-egismoc/`](patch/fingerprint-egismoc/) — the 338H SKU
 >   ships an Egis/LighTuning `1c7a:05aa` reader instead of the Goodix
 >   `27c6:6f94` the Ultra 7/9 units carry. **That reader is not supported yet**
