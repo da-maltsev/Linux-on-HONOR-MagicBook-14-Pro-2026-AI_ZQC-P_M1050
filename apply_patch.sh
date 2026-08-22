@@ -86,9 +86,11 @@
 #      registers directly. Read-only, the EC owns the curve.
 #      See patch/fan/.
 #  10) The fingerprint reader is missing from libfprint's id table. The
-#      reader differs by SKU: Goodix 27c6:6f94 (Ultra 7/9) and Egis
-#      1c7a:05aa (Ultra 5 338H, needs the SDCP-capable fork). Step [13/14]
-#      detects the SKU and rebuilds the package accordingly. See
+#      reader differs by SKU: Goodix 27c6:6f94 (Ultra 7/9) is a two-line
+#      id patch, while Egis 1c7a:05aa (Ultra 5 338H) is NOT SUPPORTED YET
+#      — its init control sequence differs from every known egismoc sensor
+#      and needs reverse-engineering. Step [13/14] detects the SKU: Goodix
+#      gets patched, 05aa is skipped with an explanation. See
 #      patch/fingerprint/ and patch/fingerprint-egismoc/.
 #  11) The fixes in steps [8/14] and [9/14] live inside kernel modules that
 #      a kernel package update replaces, and the fingerprint patch lives
@@ -431,10 +433,14 @@ fi
 # step by far: it downloads the libfprint sources and builds them.
 # Set SKIP_FINGERPRINT=1 to skip.
 #
-# The reader differs by SKU. Both are detected and handled automatically:
+# The reader differs by SKU:
 #   * Goodix 27c6:6f94 (Ultra 7/9 units)     → patch/fingerprint/
-#   * Egis  1c7a:05aa (Ultra 5 338H units)   → patch/fingerprint-egismoc/
-#     (requires the SDCP-capable libfprint fork, see that dir's README)
+#   * Egis  1c7a:05aa (Ultra 5 338H units)   → NOT SUPPORTED YET
+#     The device probes fine but stalls during open: its vendor init
+#     control-transfer sequence differs from every egismoc sensor the
+#     SDCP fork knows, so no id-table flag can fix it. It needs a USB
+#     capture under Windows first — see patch/fingerprint-egismoc/README.md.
+#     Set EGISMOC_EXPERIMENTAL=1 to attempt the build anyway.
 #────────────────────────────────────────────────────────────────────────
 echo "[13/14] Fingerprint reader (libfprint id patch)"
 if [[ "${SKIP_FINGERPRINT:-0}" == "1" ]]; then
@@ -443,7 +449,12 @@ elif ! command -v makepkg >/dev/null; then
     echo "    skipped — makepkg not found, not a pacman system"
 elif lsusb -d 1c7a:05aa >/dev/null 2>&1; then
     echo "    detected Egis 1c7a:05aa reader (Ultra 5 338H SKU)"
-    if bash "$PATCH_DIR/fingerprint-egismoc/install.sh"; then
+    if [[ "${EGISMOC_EXPERIMENTAL:-0}" != "1" ]]; then
+        echo "    UNSUPPORTED: this sensor stalls during open ('endpoint stalled') —"
+        echo "    its init control sequence is not reverse-engineered yet."
+        echo "    Skipping the build; see patch/fingerprint-egismoc/README.md"
+        echo "    for what is known and set EGISMOC_EXPERIMENTAL=1 to try anyway."
+    elif bash "$PATCH_DIR/fingerprint-egismoc/install.sh"; then
         echo "    OK"
     else
         echo "    [warn] libfprint (egismoc) rebuild failed — earlier steps still"

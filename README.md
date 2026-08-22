@@ -9,8 +9,11 @@ own README, measurements, and installer.
 > Omarchy (the original was developed on CachyOS). Changes:
 > * [`patch/fingerprint-egismoc/`](patch/fingerprint-egismoc/) — the 338H SKU
 >   ships an Egis/LighTuning `1c7a:05aa` reader instead of the Goodix
->   `27c6:6f94` the Ultra 7/9 units carry. `apply_patch.sh` auto-detects the
->   reader by USB id at step 13.
+>   `27c6:6f94` the Ultra 7/9 units carry. **That reader is not supported yet**
+>   (it stalls during device open; its init sequence is not reverse-engineered).
+>   `apply_patch.sh` detects it at step [13/14] and skips with an explanation;
+>   `apply_patch.sh` also auto-detects the working Goodix reader for Ultra 7/9
+>   units.
 > * Omarchy boots a UKI via `limine-mkinitcpio`, and its `omarchy_hooks.conf`
 >   drop-in overrides the base `HOOKS=`. The original script edited
 >   `/etc/mkinitcpio.conf` (which the drop-in ignores), so the ACPI override
@@ -26,7 +29,7 @@ own README, measurements, and installer.
 |---|---|---|
 | Touchpad, touchscreen, internal keyboard | works | [`patch/acpi-override/`](patch/acpi-override/) — patched SSDT27 plus `i8042.dumbkbd=1`. **Prerequisite for a usable machine** |
 | Microphone mutes itself, mic-mute LED flickers | works | [`patch/micmute/`](patch/micmute/) — HID-BPF fixup for the touchscreen's vendor collection |
-| Fingerprint reader, Goodix `27c6:6f94` | works | [`patch/fingerprint/`](patch/fingerprint/) — two-line `libfprint` id patch |
+| Fingerprint reader, Goodix `27c6:6f94` | works | [`patch/fingerprint/`](patch/fingerprint/) — two-line `libfprint` id patch. **Ultra 5 338H SKU only has the Egis `1c7a:05aa`, which is not supported yet** — see [`patch/fingerprint-egismoc/`](patch/fingerprint-egismoc/) |
 | Headset microphone, 3.5 mm jack | works | [`patch/headset-mic/`](patch/headset-mic/) — one-line `SND_PCI_QUIRK` for ALC256 |
 | OLED minimum brightness too low, uneven steps | works | [`patch/oled-backlight/`](patch/oled-backlight/) — patched VBT raises the firmware's backlight floor |
 | Touchpad left-edge slide (brightness gesture) | works | [`patch/touchpad-edge/`](patch/touchpad-edge/) — HID-BPF turns the vendor gesture report into brightness keys. The right edge (volume) goes through the EC and works unaided |

@@ -1,98 +1,68 @@
-# Fingerprint reader — Egis 1c7a:05aa (Ultra 5 338H SKU)
+# Fingerprint reader — Egis 1c7a:05aa (Ultra 5 338H SKU) — NOT SUPPORTED YET
 
-The Ultra 5 338H SKU of the HONOR MagicBook Pro 14 AI (ZQC-P) ships an
-**Egis/LighTuning match-on-chip** reader (`1c7a:05aa`,
-`"Egistec-ETU906Axx"`) on USB, instead of the Goodix `27c6:6f94` that the
-Ultra 7/9 units carry (handled by `../fingerprint/`).
+**Status: does not work.** The device is detected and probes cleanly, but
+`fprintd-enroll` fails during device **open**:
 
-## Problem
-
-Upstream `libfprint`'s `egismoc` driver:
-
-1. does not list `0x05aa` in its id table, and
-2. does not implement **SDCP** (Secure Device Connection Protocol), which
-   recent Egis firmware requires before it persists enrolled prints on the
-   sensor chip.
-
-The second point is subtle and worth knowing: without SDCP, `fprintd-enroll`
-completes *without error*, the print is saved under `/var/lib/fprint/`, but
-nothing is actually stored on the chip. The first `fprintd-verify` asks the
-device for its enrolled prints, gets `0`, and fprintd deletes the local copy
-with *"Deleted stored finger as it is unknown to device"*. The fingerprint is
-gone permanently.
-
-## Fix
-
-Build [TenSeventy7/libfprint-egismoc-sdcp](https://github.com/TenSeventy7/libfprint-egismoc-sdcp)
-(which adds the `FpiSdcpDevice` base class the egismoc driver inherits), then
-add `0x05aa` to the egismoc id table.
-
-```sh
-sudo bash patch/fingerprint-egismoc/install.sh
+```
+failed to claim device: GDBus.Error:net.reactivated.Fprint.Error.Internal:
+Open failed with error: endpoint stalled or request not supported
 ```
 
-It builds a pacman-owned `libfprint` package (pkgver `1.94.100`, pkgrel bumped
-past the repo's so `pacman -Syu` won't silently swap it back), installs it,
-restarts `fprintd`, and verifies the device is claimed.
+Everything in this directory builds and installs fine — the reader just
+cannot be opened. Kept here as the starting point for whoever picks the
+reverse-engineering up.
 
-### The one experimental knob
+## Where exactly it fails
 
-The id-table flags for `0x05aa` are inferred from its neighbours: `0x05a1`
-and `0x05a5` use `EGISMOC_DRIVER_CHECK_PREFIX_TYPE2`, so the patch defaults to
-`TYPE2`. This is the *check prefix* the driver expects in device responses.
-If enrollment stalls or fails, try the other type:
+`egismoc_open()` runs a hard-coded vendor **control-transfer init sequence**
+(`egismoc_dev_init_handler`: vendor requests `bRequest=32` ×2 and `bRequest=82`,
+plus two standard GET_STATUS probes). The 05aa sensor STALLs one of those
+vendor requests.
+
+Consequences:
+
+* The `TYPE1`/`TYPE2` id-table flag (this patch's only knob) **cannot help** —
+  it selects a prefix inside a later bulk "check" command, not the open path.
+* The sibling sensor `1c7a:05a5` (ETU906Axx-**E**) *does* work with this same
+  fork — it opens, and only needs SDCP for enrollment. So `05aa` is a distinct
+  firmware/protocol revision, not just a missing table entry.
+* No existing support anywhere: upstream libfprint, the TenSeventy7 fork, and
+  the community hubs all lack `05aa`. The Windows driver INF for it is
+  `egistouchfp05aa.inf`.
+
+## What fixing it would take
+
+1. Boot Windows on the machine, install Wireshark + USBPcap.
+2. Capture the USB traffic while Windows Hello initializes the sensor — focus
+   on the control transfers right after interface claim (the equivalents of
+   `DEV_INIT_CONTROL1..5`).
+3. Diff against the sequence in `egismoc.c`; add a per-id init variant keyed
+   off `driver_data`, then re-test open → SDCP connect → enroll.
+
+The rs0x29a repo author did the same class of work for this laptop's touchpad
+(see `reference/` and `win11_dump/`), so the workflow is proven on this unit.
+
+## What ships here anyway
+
+* `libfprint-egismoc-honor-zqc-p-05aa.patch` — adds `0x05aa`
+  (`EGISMOC_DRIVER_CHECK_PREFIX_TYPE2`) to the egismoc id table and links
+  OpenSSL for the egismoc driver in `meson.build`.
+* `PKGBUILD` / `install.sh` — build the TenSeventy7 SDCP fork as a
+  pacman-owned package with that patch. They work; the result just cannot
+  open this particular sensor yet.
+
+`apply_patch.sh` detects the reader at step [13/14] and skips the build with an
+explanation. To experiment regardless:
 
 ```sh
-sudo EGISMOC_PREFIX_TYPE=TYPE1 bash patch/fingerprint-egismoc/install.sh
+sudo EGISMOC_EXPERIMENTAL=1 bash patch/fingerprint-egismoc/install.sh
 ```
 
-The two hunks live in `libfprint-egismoc-honor-zqc-p-05aa.patch`:
-
-1. `libfprint/drivers/egismoc/egismoc.c` — adds `0x05aa` to `egismoc_id_table`.
-2. `meson.build` — adds `'egismoc' : [ 'openssl' ]` to `driver_helper_mapping`.
-   The fork's SDCP code uses OpenSSL `EVP_MAC_*`, but upstream's mapping only
-   links OpenSSL for `uru4000`. With `-D drivers=all` that happens to cover it,
-   but a `drivers=egismoc`-only build would fail to link — so the dependency is
-   made explicit. (Same fix as antoskuu/libfprint-egismoc-sdcp-fix.)
-
-## Verify
-
-```sh
-# the device is claimed by egismoc + SDCP
-fprintd-list "$USER"          # expect: "found 1 devices" and the Egis reader
-
-# enroll + verify (repeat the reader touches)
-fprintd-enroll -f right-index-finger
-fprintd-verify
-```
-
-## Enable for login / sudo / lock screen
-
-Add `auth sufficient pam_fprintd.so` **above** the `auth ... pam_unix.so`
-line in the relevant PAM configs. On Omarchy:
-
-```sh
-# sudo
-sudo sed -i '1i auth sufficient pam_fprintd.so' /etc/pam.d/sudo
-# local login
-sudo sed -i '1i auth sufficient pam_fprintd.so' /etc/pam.d/login
-# lock screen (hyprlock) + display manager (sddm) — insert above pam_unix there too
-```
-
-For sddm, add the line to `/etc/pam.d/sddm` (and `/etc/pam.d/kde` if used).
-For hyprlock, `pam_unix.so` in `/etc/pam.d/hyprlock`.
-
-## Upstream status
-
-As of 2026-08, SDCP for egismoc is still not merged into upstream libfprint
-(the fork is from 2025-07, pinned at commit
-`4d128d4f6f0b46182572126e84df88a73ac27859` in `PKGBUILD`). Upstream's egismoc
-id table has grown (e.g. `0588`, `05ae`, `0603`) but `0x05aa` is absent and
-SDCP is missing. When SDCP lands upstream, this whole directory becomes a
-one-line id patch against upstream libfprint — same shape as `../fingerprint/`.
+(Revert afterwards with `sudo pacman -S libfprint`.)
 
 ## References
 
 - https://github.com/TenSeventy7/libfprint-egismoc-sdcp
-- https://github.com/antoskuu/libfprint-egismoc-sdcp-fix (SDCP background + the OpenSSL linkage fix)
+- https://gist.github.com/bidual/193e2878ca4b5e1dd02427eb23783a4a (working sibling 05a5)
+- https://github.com/antoskuu/libfprint-egismoc-sdcp-fix (SDCP background + OpenSSL linkage fix)
 - https://gitlab.freedesktop.org/libfprint/libfprint/-/issues/569
