@@ -5,6 +5,21 @@ a HID descriptor fixup, three small kernel/userspace patches, and a fan sensor
 module. Each fix lives in its own directory under [`patch/`](patch/) with its
 own README, measurements, and installer.
 
+> **This fork** adds support for the Ultra 5 338H SKU and for stock Arch /
+> Omarchy (the original was developed on CachyOS). Changes:
+> * [`patch/fingerprint-egismoc/`](patch/fingerprint-egismoc/) — the 338H SKU
+>   ships an Egis/LighTuning `1c7a:05aa` reader instead of the Goodix
+>   `27c6:6f94` the Ultra 7/9 units carry. `apply_patch.sh` auto-detects the
+>   reader by USB id at step 13.
+> * Omarchy boots a UKI via `limine-mkinitcpio`, and its `omarchy_hooks.conf`
+>   drop-in overrides the base `HOOKS=`. The original script edited
+>   `/etc/mkinitcpio.conf` (which the drop-in ignores), so the ACPI override
+>   never reached the boot image and the touchpad stayed dead. `apply_patch.sh`
+>   now patches the drop-ins too and verifies the SSDT landed in the UKI.
+> * `headset-mic`, `sof-audio` and `cdclk-ptl` no longer assume a clang-built
+>   kernel or a CachyOS-style release string; they detect the toolchain and
+>   sync `EXTRAVERSION` from the running kernel's Makefile.
+
 ## Status
 
 | Area | State | Fix |
