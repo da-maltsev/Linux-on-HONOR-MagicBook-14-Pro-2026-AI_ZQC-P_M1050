@@ -53,11 +53,21 @@ fingerprint)
     w "=== deferred fingerprint rebuild ==="
     wait_for_pacman || exit 0
     rc=0
-    SUDO_USER="${BUILD_USER:-root}" bash "${REPO}/patch/fingerprint/install.sh" >>"$LOG" 2>&1 || rc=$?
+    # Reader differs by SKU: Egis 1c7a:05aa (Ultra 5 338H) vs Goodix 27c6:6f94.
+    if lsusb -d 1c7a:05aa >/dev/null 2>&1; then
+        SUDO_USER="${BUILD_USER:-root}" bash "${REPO}/patch/fingerprint-egismoc/install.sh" >>"$LOG" 2>&1 || rc=$?
+        onfail="${REPO}/patch/fingerprint-egismoc/install.sh"
+    elif lsusb -d 27c6:6f94 >/dev/null 2>&1; then
+        SUDO_USER="${BUILD_USER:-root}" bash "${REPO}/patch/fingerprint/install.sh" >>"$LOG" 2>&1 || rc=$?
+        onfail="${REPO}/patch/fingerprint/install.sh"
+    else
+        w "fingerprint: no known reader on USB (27c6:6f94 / 1c7a:05aa), skipped"
+        exit 0
+    fi
     if (( rc == 0 )); then
         w "fingerprint: ok"
     else
-        w "fingerprint: FAILED (rc=${rc}), run: sudo bash ${REPO}/patch/fingerprint/install.sh"
+        w "fingerprint: FAILED (rc=${rc}), run: sudo bash ${onfail}"
     fi
     ;;
 

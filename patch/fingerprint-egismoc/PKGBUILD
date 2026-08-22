@@ -1,0 +1,90 @@
+# libfprint rebuilt from the SDCP-capable fork, with the HONOR MagicBook Pro
+# 14 AI (ZQC-P, Ultra 5 338H) Egis reader id added.
+#
+# Why a fork and not upstream libfprint?
+#   The Ultra 5 338H SKU ships an Egis/LighTuning match-on-chip reader
+#   (1c7a:05aa, "Egistec-ETU906Axx") instead of the Goodix 27c6:6f94 that the
+#   Ultra 7/9 units carry. Upstream libfprint's egismoc driver does not
+#   implement Microsoft SDCP (Secure Device Connection Protocol), which recent
+#   Egis firmware requires before it persists enrolled prints on-chip. Without
+#   SDCP, enrollment appears to succeed but the first verify finds 0 prints and
+#   fprintd deletes the local copy. TenSeventy7/libfprint-egismoc-sdcp adds the
+#   SDCP base class (FpiSdcpDevice) that the egismoc driver now inherits.
+#
+# The fork predates the 05aa sensor, so we add the id to the egismoc id table.
+# It sits next to 05a1/05a5, which use EGISMOC_DRIVER_CHECK_PREFIX_TYPE2; if
+# enrollment fails on your unit, try EGISMOC_DRIVER_CHECK_PREFIX_TYPE1 instead
+# (see install.sh's TYPEnote and this dir's README.md).
+#
+# The meson driver_helper_mapping change links OpenSSL into the build whenever
+# egismoc is enabled. The fork's SDCP code (libfprint/fpi-sdcp-device.c) uses
+# OpenSSL EVP_MAC_*, but upstream's mapping only links OpenSSL for uru4000.
+# With -D drivers=all that happens to cover it, but a drivers=egismoc build
+# would fail to link — so we make the dependency explicit.
+
+pkgname=libfprint
+pkgver=1.94.100
+pkgrel=2
+pkgdesc="Library for fingerprint readers (+ HONOR ZQC-P Egis 1c7a:05aa, SDCP)"
+url="https://github.com/TenSeventy7/libfprint-egismoc-sdcp"
+arch=(x86_64)
+license=(LGPL-2.1-or-later)
+depends=(
+  libgcc
+  glib2
+  glibc
+  libgudev
+  libgusb
+  openssl
+  pixman
+)
+makedepends=(
+  git
+  meson
+  ninja
+  glib2-devel
+  gobject-introspection
+  python
+)
+provides=(libfprint-2.so)
+conflicts=()
+replaces=()
+groups=(fprint)
+
+_commit=4d128d4f6f0b46182572126e84df88a73ac27859
+source=("libfprint::git+https://github.com/TenSeventy7/libfprint-egismoc-sdcp.git#commit=${_commit}"
+        "libfprint-egismoc-honor-zqc-p-05aa.patch")
+b2sums=('SKIP'
+        'SKIP')
+
+prepare() {
+  cd "$pkgname"
+  if grep -q '0x05aa' libfprint/drivers/egismoc/egismoc.c; then
+    echo "05aa already present — skipping id patch"
+  else
+    patch -p1 < "$srcdir/libfprint-egismoc-honor-zqc-p-05aa.patch"
+  fi
+}
+
+build() {
+  cd "$pkgname"
+  meson setup build \
+    --prefix=/usr --libdir=lib --buildtype=plain \
+    -D drivers=all \
+    -D installed-tests=false \
+    -D doc=false \
+    -D gtk-examples=false \
+    -D introspection=true
+  meson compile -C build
+}
+
+check() {
+  : # skipped: fork build, upstream suite needs umockdev
+}
+
+package() {
+  cd "$pkgname"
+  DESTDIR="$pkgdir" meson install -C build
+}
+
+# vim:set sw=2 sts=-1 et:

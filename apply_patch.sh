@@ -85,9 +85,11 @@
 #      stub. Step [12/14] installs a small hwmon module that reads the EC
 #      registers directly. Read-only, the EC owns the curve.
 #      See patch/fan/.
-#  10) The fingerprint reader (Goodix 27c6:6f94) is missing from
-#      libfprint's id table. Step [13/14] rebuilds the package with two
-#      lines added. See patch/fingerprint/.
+#  10) The fingerprint reader is missing from libfprint's id table. The
+#      reader differs by SKU: Goodix 27c6:6f94 (Ultra 7/9) and Egis
+#      1c7a:05aa (Ultra 5 338H, needs the SDCP-capable fork). Step [13/14]
+#      detects the SKU and rebuilds the package accordingly. See
+#      patch/fingerprint/ and patch/fingerprint-egismoc/.
 #  11) The fixes in steps [8/14] and [9/14] live inside kernel modules that
 #      a kernel package update replaces, and the fingerprint patch lives
 #      in libfprint, which a libfprint update replaces. Step [14/14]
@@ -122,6 +124,37 @@ req sed
 req cp
 
 mkdir -p "$BACKUP"
+
+# Verify that the patched SSDT landed in the boot image (UKI or initramfs).
+# Returns 0 if found, non-zero otherwise. Tolerates missing objcopy by
+# falling back to a raw scan of the boot image (cpio stores filenames in
+# plain text, so a simple grep is enough in practice).
+verify_acpi_override_in_boot_image() {
+    local aml="/usr/lib/firmware/acpi/SSDT27_TPD0.aml"
+    local img found=1 probe
+
+    [[ -f "$aml" ]] || { echo "    ERROR: $aml missing"; return 1; }
+
+    # Candidate boot images: Omarchy/Limine UKIs first, then initramfs files.
+    shopt -s nullglob
+    for img in /boot/EFI/Linux/*.efi /boot/initramfs-*.img /boot/*/initramfs-*; do
+        [[ -f "$img" ]] || continue
+        probe="$img"
+        # For UKIs, pull out the embedded initrd (objcopy is the reliable
+        # way); for plain initramfs the file is already the cpio.
+        if [[ "$img" == *.efi ]] && command -v objcopy >/dev/null; then
+            if objcopy -O binary --only-section=.initrd "$img" /tmp/honor-uki-initrd.bin 2>/dev/null; then
+                probe=/tmp/honor-uki-initrd.bin
+            fi
+        fi
+        if grep -q 'SSDT27_TPD0' "$probe" 2>/dev/null; then
+            echo "    OK: SSDT27_TPD0.aml is in $(basename "$img")"
+            found=0
+        fi
+    done
+    rm -f /tmp/honor-uki-initrd.bin
+    return $found
+}
 
 #────────────────────────────────────────────────────────────────────────
 # [1/14] Backup everything we are about to touch.
@@ -233,15 +266,48 @@ fi
 
 #────────────────────────────────────────────────────────────────────────
 # [7/14] Rebuild initramfs and regenerate Limine config.
+#
+# Distro matrix (see README "Other bootloaders"):
+#   * Omarchy boots a UKI via the limine-mkinitcpio hook. There is no
+#     /etc/mkinitcpio.d/linux.preset, so a bare `mkinitcpio -P` does
+#     nothing useful. The supported rebuild is `limine-update` (which
+#     shells out to limine-mkinitcpio → limine-mkinitcpio-install).
+#   * Arch/CachyOS + Limine: `limine-update` if present, else mkinitcpio -P.
+#   * mkinitcpio-only distros (GRUB/systemd-boot/rEFInd): mkinitcpio -P.
+#
+# After the rebuild we verify that the patched SSDT actually landed in the
+# boot image. This is the exact failure this script used to hide: a
+# concurrent `pacman -Syu` can rebuild the UKI from a stale mkinitcpio.conf
+# (or the AML copy can land after the rebuild), and the table silently never
+# reaches the kernel. A missing table here is a hard failure, not a warning.
 #────────────────────────────────────────────────────────────────────────
-echo "[7/14] Rebuild initramfs"
+echo "[7/14] Rebuild initramfs / UKI"
 if command -v limine-update >/dev/null; then
     limine-update
+elif [[ -x /usr/share/libalpm/scripts/limine-mkinitcpio-install ]]; then
+    # Omarchy without the limine-update wrapper: drive the hook directly.
+    echo rebuild | /usr/share/libalpm/scripts/limine-mkinitcpio-install
 else
     mkinitcpio -P
-    echo "    note: limine-update not found — if you use Limine, run it now"
-    echo "    or rebuild your bootloader config manually."
+    echo "    note: no limine-update / limine-mkinitcpio-install found — if you"
+    echo "    use Limine, rebuild your bootloader config manually."
 fi
+
+echo "    verifying the patched SSDT made it into the boot image..."
+verify_acpi_override_in_boot_image || {
+    cat <<'EOF'
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║  WARNING: the ACPI override did NOT make it into the boot image.      ║
+║  The touchpad/touchscreen will stay dead after reboot.                ║
+║                                                                       ║
+║  This is usually a rebuild-ordering race. Re-run:                     ║
+║      sudo limine-update        (or: sudo mkinitcpio -P)               ║
+║  and check again that /usr/lib/firmware/acpi/SSDT27_TPD0.aml shows up ║
+║  in the UKI's .initrd section (or the initramfs early CPIO).          ║
+╚═══════════════════════════════════════════════════════════════════════╝
+EOF
+}
 
 #────────────────────────────────────────────────────────────────────────
 # [8/14] Build + install ALC256 codec quirk for the 3.5mm-jack headset mic.
@@ -336,22 +402,42 @@ else
 fi
 
 #────────────────────────────────────────────────────────────────────────
-# [13/14] Rebuild libfprint with the Goodix 27c6:6f94 id added, as a
-# pacman-owned package so it does not conflict on the next update. This
-# is the slowest step by far: it downloads the libfprint sources and
-# builds them. Set SKIP_FINGERPRINT=1 to skip.
+# [13/14] Rebuild libfprint with the fingerprint id added, as a pacman-owned
+# package so it does not conflict on the next update. This is the slowest
+# step by far: it downloads the libfprint sources and builds them.
+# Set SKIP_FINGERPRINT=1 to skip.
+#
+# The reader differs by SKU. Both are detected and handled automatically:
+#   * Goodix 27c6:6f94 (Ultra 7/9 units)     → patch/fingerprint/
+#   * Egis  1c7a:05aa (Ultra 5 338H units)   → patch/fingerprint-egismoc/
+#     (requires the SDCP-capable libfprint fork, see that dir's README)
 #────────────────────────────────────────────────────────────────────────
 echo "[13/14] Fingerprint reader (libfprint id patch)"
 if [[ "${SKIP_FINGERPRINT:-0}" == "1" ]]; then
     echo "    skipped — SKIP_FINGERPRINT=1"
 elif ! command -v makepkg >/dev/null; then
     echo "    skipped — makepkg not found, not a pacman system"
-elif bash "$PATCH_DIR/fingerprint/install.sh"; then
-    echo "    OK"
+elif lsusb -d 1c7a:05aa >/dev/null 2>&1; then
+    echo "    detected Egis 1c7a:05aa reader (Ultra 5 338H SKU)"
+    if bash "$PATCH_DIR/fingerprint-egismoc/install.sh"; then
+        echo "    OK"
+    else
+        echo "    [warn] libfprint (egismoc) rebuild failed — earlier steps still"
+        echo "    apply; only the fingerprint reader will stay unusable. Inspect"
+        echo "    patch/fingerprint-egismoc/install.sh output above."
+    fi
+elif lsusb -d 27c6:6f94 >/dev/null 2>&1; then
+    echo "    detected Goodix 27c6:6f94 reader (Ultra 7/9 SKU)"
+    if bash "$PATCH_DIR/fingerprint/install.sh"; then
+        echo "    OK"
+    else
+        echo "    [warn] libfprint rebuild failed — earlier steps still apply;"
+        echo "    only the fingerprint reader will stay unusable. Inspect"
+        echo "    patch/fingerprint/install.sh output above."
+    fi
 else
-    echo "    [warn] libfprint rebuild failed — earlier steps still apply;"
-    echo "    only the fingerprint reader will stay unusable. Inspect"
-    echo "    patch/fingerprint/install.sh output above."
+    echo "    skipped — no known fingerprint reader found on USB"
+    echo "    (expected 27c6:6f94 Goodix or 1c7a:05aa Egis); run 'lsusb' to check"
 fi
 
 #────────────────────────────────────────────────────────────────────────
