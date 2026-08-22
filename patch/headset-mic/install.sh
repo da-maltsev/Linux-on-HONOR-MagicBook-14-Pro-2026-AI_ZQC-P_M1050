@@ -44,10 +44,19 @@ req curl
 req zstdcat
 req zstd
 req make
-req clang
 req depmod
 req modprobe
 req strings
+# Pick the compiler the running kernel was built with: CachyOS ships LLVM,
+# stock Arch/Omarchy ships GCC. Forcing the wrong one breaks the build with
+# flags the other compiler does not understand (e.g. -mindirect-branch).
+KCC=()
+if zcat /proc/config.gz 2>/dev/null | grep -q 'CONFIG_CC_IS_CLANG=y'; then
+    req clang
+    KCC=(CC=clang LLVM=1)
+else
+    req gcc
+fi
 # alsa-tools (hda-verb) is needed by the jack-sense helper service.
 # Build can proceed without it, but the service won't function — warn.
 if ! command -v hda-verb >/dev/null; then
@@ -303,7 +312,7 @@ snd-hda-codec-alc269-y := alc269.o
 ccflags-y += -I\$(src)
 
 default:
-	\$(MAKE) -C \$(KDIR) M=\$(PWD) CC=clang LLVM=1 modules
+	\$(MAKE) -C \$(KDIR) M=\$(PWD) ${KCC[*]} modules
 
 clean:
 	\$(MAKE) -C \$(KDIR) M=\$(PWD) clean

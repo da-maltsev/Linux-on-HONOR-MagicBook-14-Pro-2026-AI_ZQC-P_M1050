@@ -58,6 +58,15 @@ if ! lsusb -d "$FP_VID_PID" >/dev/null 2>&1; then
 fi
 log "Found fingerprint reader $FP_VID_PID"
 
+# Idempotency / loop guard: our package's pkgdesc carries "1c7a:05aa". If it is
+# already installed, a pacman -U below would re-trigger the libfprint pacman
+# hook and rebuild forever. The pacman hook also invokes this script, so this
+# check is what breaks that cycle after the patched package has landed.
+if pacman -Qi libfprint 2>/dev/null | grep -q '1c7a:05aa'; then
+    log "patched libfprint (1c7a:05aa) already installed — nothing to do"
+    exit 0
+fi
+
 # --- 2. build deps ------------------------------------------------------------
 if ! command -v pacman >/dev/null 2>&1; then
     warn "Not a pacman system — this installer only supports Arch/Omarchy/CachyOS."
@@ -65,7 +74,7 @@ if ! command -v pacman >/dev/null 2>&1; then
 fi
 log "Installing build dependencies (pacman)"
 pacman -S --needed --noconfirm \
-    base-devel git meson ninja glib2 libgusb nss libgudev \
+    base-devel git meson ninja glib2 glib2-devel libgusb nss libgudev \
     gobject-introspection python
 
 # --- 3. stage a writable build dir for the non-root builder -------------------
@@ -94,7 +103,8 @@ log "Building patched libfprint (SDCP fork) — this takes a few minutes"
 ( cd "$PKGDIR" && sudo -u "$BUILD_USER" makepkg --skippgpcheck --nocheck -f ) \
     >/dev/null 2>&1 || die "makepkg failed — run it by hand in $PKGDIR to see why"
 
-PKGFILE=$(ls -t "$PKGDIR"/libfprint-*.pkg.tar.* 2>/dev/null | head -1)
+# Exclude libfprint-debug-*.pkg.tar.* (the debug package sorts first under -t).
+PKGFILE=$(ls -t "$PKGDIR"/libfprint-[0-9]*.pkg.tar.* 2>/dev/null | head -1)
 [[ -n "$PKGFILE" ]] || die "makepkg produced no package in $PKGDIR"
 
 log "Installing $(basename "$PKGFILE")"

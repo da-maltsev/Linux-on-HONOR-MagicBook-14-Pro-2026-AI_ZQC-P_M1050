@@ -28,6 +28,7 @@ pkgrel=2
 pkgdesc="Library for fingerprint readers (+ HONOR ZQC-P Egis 1c7a:05aa, SDCP)"
 url="https://github.com/TenSeventy7/libfprint-egismoc-sdcp"
 arch=(x86_64)
+options=(!debug)
 license=(LGPL-2.1-or-later)
 depends=(
   libgcc

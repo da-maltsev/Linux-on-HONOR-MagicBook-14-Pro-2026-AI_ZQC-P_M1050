@@ -158,10 +158,17 @@ fi
 log "restoring the running kernel's config"
 read_config > .config
 
-# vermagic must come out identical or the module will not load. On Arch-like
-# trees the release suffix lives in these two files.
+# vermagic must come out identical or the module will not load. On Arch the
+# "-arch1" suffix lives in the top Makefile's EXTRAVERSION (not a localversion
+# file), while the pkgrel ("-3") is in localversion.10-pkgrel. CachyOS puts the
+# whole suffix in a single localversion file. Sync both sources.
 if [[ -r "${MODDIR}/build/localversion.10-pkgrel" ]]; then
     cp "${MODDIR}/build/"localversion.* .
+    EXTRAVER="$(sed -n 's/^EXTRAVERSION = //p' "${MODDIR}/build/Makefile" | head -1)"
+    if [[ -n "${EXTRAVER:-}" ]]; then
+        sed -i "s|^EXTRAVERSION *=.*|EXTRAVERSION = ${EXTRAVER}|" Makefile
+        log "synced EXTRAVERSION '${EXTRAVER}' from the running kernel's Makefile"
+    fi
 else
     # Derive "-1-cachyos" style suffix from the running release string.
     printf '%s\n' "-${KVER#${KBASE}}" | sed 's/^--/-/' > localversion.90-local

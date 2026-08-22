@@ -79,13 +79,21 @@ req curl
 req zstdcat
 req zstd
 req make
-req clang
-req ld.lld
-req llvm-objcopy
 req patch
 req depmod
 req modprobe
 req modinfo
+# Pick the compiler the running kernel was built with (CachyOS = LLVM,
+# stock Arch/Omarchy = GCC). Forcing the wrong one breaks the build.
+KCC=()
+if zcat /proc/config.gz 2>/dev/null | grep -q 'CONFIG_CC_IS_CLANG=y'; then
+    req clang
+    req ld.lld
+    req llvm-objcopy
+    KCC=(LLVM=1 LLVM_IAS=1)
+else
+    req gcc
+fi
 
 echo "[*] kernel  = ${KVER}"
 echo "[*] target  = ${KO_OVERLAY}"
@@ -311,8 +319,8 @@ for f in "${WORK}/intel/common"/*; do
     install -m 0644 "$f" "${BUILD_DIR}/sound/soc/intel/common/$(basename "$f")"
 done
 
-echo "[*] building snd-sof.ko (LLVM toolchain)"
-( cd "$BUILD_DIR" && make LLVM=1 LLVM_IAS=1 \
+echo "[*] building snd-sof.ko (${KCC[*]:-gcc toolchain})"
+( cd "$BUILD_DIR" && make "${KCC[@]}" \
     M=sound/soc/sof modules ) 2>&1 | tail -12
 
 BUILT_KO="${BUILD_DIR}/sound/soc/sof/snd-sof.ko"

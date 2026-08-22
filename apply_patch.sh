@@ -184,20 +184,44 @@ echo "    /etc/initcpio/install/acpi_override"
 
 #────────────────────────────────────────────────────────────────────────
 # [3/14] Wire acpi_override into HOOKS=… (right after autodetect).
+#
+# Two places matter:
+#   * /etc/mkinitcpio.conf — the base config.
+#   * /etc/mkinitcpio.conf.d/*.conf — drop-ins that OVERRIDE the base HOOKS.
+#     Omarchy ships omarchy_hooks.conf, which redefines the whole HOOKS array
+#     (base udev plymouth ... autodetect microcode ...) and, without this step,
+#     silently drops acpi_override. This is exactly why the original run looked
+#     successful yet the patched SSDT never reached the boot image.
 #────────────────────────────────────────────────────────────────────────
-echo "[3/14] Patch /etc/mkinitcpio.conf"
-if ! grep -qE '^HOOKS=.*\bacpi_override\b' /etc/mkinitcpio.conf; then
-    sed -i 's/\bautodetect\b/autodetect acpi_override/' /etc/mkinitcpio.conf
-    echo "    + acpi_override added to HOOKS"
-else
-    echo "    HOOKS already contain acpi_override — skipped"
-fi
+echo "[3/14] Patch mkinitcpio HOOKS (base config + drop-ins)"
+patched_any=0
+add_acpi_override_to() {
+    local f="$1"
+    [[ -f "$f" ]] || return
+    if ! grep -qE '^HOOKS=.*\bacpi_override\b' "$f"; then
+        if grep -qE '^HOOKS=.*\bautodetect\b' "$f"; then
+            sed -i 's/\bautodetect\b/autodetect acpi_override/' "$f"
+            echo "    + acpi_override added to $f"
+            patched_any=1
+        else
+            echo "    [warn] no 'autodetect' in $f — add acpi_override manually"
+        fi
+    else
+        echo "    $f already has acpi_override — skipped"
+    fi
+}
+
+add_acpi_override_to /etc/mkinitcpio.conf
+for f in /etc/mkinitcpio.conf.d/*.conf; do
+    add_acpi_override_to "$f"
+done
+
 # Some older instructions left FILES=(/usr/lib/firmware/acpi/DSDT.aml). Reset it.
 if grep -qE '^FILES=\(/usr/lib/firmware/acpi/' /etc/mkinitcpio.conf; then
     sed -i 's|^FILES=(/usr/lib/firmware/acpi/[^)]*)|FILES=()|' /etc/mkinitcpio.conf
     echo "    cleaned stale FILES= entry"
 fi
-echo "    HOOKS=$(grep -E '^HOOKS=' /etc/mkinitcpio.conf)"
+(( patched_any )) || echo "    note: acpi_override already present everywhere"
 
 #────────────────────────────────────────────────────────────────────────
 # [4/14] Append i8042.dumbkbd=1 to Limine default cmdline (idempotent).
