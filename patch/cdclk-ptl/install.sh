@@ -195,11 +195,82 @@ KO="drivers/gpu/drm/xe/xe.ko"
 
 # --- 7. finish the module the way modules_install would -----------------------
 # BTF first, then strip: .BTF is not a .debug section and survives the strip.
-if command -v pahole >/dev/null && [[ -r /sys/kernel/btf/vmlinux ]]; then
-    log "generating module BTF against the running kernel's base BTF"
-    LLVM_OBJCOPY=llvm-objcopy pahole -J --btf_base /sys/kernel/btf/vmlinux "$KO" \
-        || warn "BTF generation failed, continuing without it"
-fi
+#
+# The module's .BTF must be produced exactly the way the kernel produces it
+# for its own modules: scripts/gen-btf.sh with the PAHOLE_FLAGS from
+# scripts/Makefile.btf, plus resolve_btfids. A bare
+# `pahole -J --btf_base ...` encodes BTF without the kernel's feature set,
+# and on pahole >= 1.26 the result is structurally invalid. The kernel's
+# strict btf_validate_module() then rejects the module with -EINVAL and it
+# refuses to load at all — no xe, no intel_backlight, no external
+# connectors. That is what killed the display on 7.2.3.
+gen_module_btf() {
+    local ko="$1"
+    local genbtf="scripts/gen-btf.sh"
+    local resolve="tools/bpf/resolve_btfids/resolve_btfids"
+    [[ -x "$resolve" ]] || resolve="${MODDIR}/build/tools/bpf/resolve_btfids/resolve_btfids"
+    if ! command -v pahole >/dev/null; then
+        warn "pahole not found, the module will be built without BTF"
+        return 0
+    fi
+    if [[ ! -r /sys/kernel/btf/vmlinux ]]; then
+        warn "/sys/kernel/btf/vmlinux missing, the module will be built without BTF"
+        return 0
+    fi
+    if [[ ! -f "$genbtf" || ! -x "$resolve" ]]; then
+        warn "gen-btf.sh or resolve_btfids missing, the module will be built without BTF"
+        return 0
+    fi
+
+    # PAHOLE_FLAGS exactly as scripts/Makefile.btf computes them for this
+    # tree: pahole version from the kernel config, lang_exclude when the
+    # kernel was configured with it.
+    local pver features
+    pver="$(read_config | grep '^CONFIG_PAHOLE_VERSION=' | cut -d= -f2)"
+    if [[ -n "$pver" && "$pver" -ge 126 ]]; then
+        features="encode_force,var,float,enum64,decl_tag,type_tag,optimized_func,consistent_func,decl_tag_kfuncs"
+        (( pver >= 130 )) && features+=",attributes"
+        (( pver >= 131 )) && features+=",layout"
+        PAHOLE_FLAGS="-j${JOBS} --btf_features=${features}"
+        read_config | grep -q '^CONFIG_PAHOLE_HAS_LANG_EXCLUDE=y' \
+            && PAHOLE_FLAGS+=" --lang_exclude=rust"
+    else
+        PAHOLE_FLAGS="--btf_gen_floats -j${JOBS}"
+        { [[ -z "$pver" ]] || (( pver >= 125 )); } \
+            && PAHOLE_FLAGS+=" --skip_encoding_btf_inconsistent_proto --btf_gen_optimized"
+    fi
+    export PAHOLE="pahole" PAHOLE_FLAGS
+    export RESOLVE_BTFIDS="$resolve" RESOLVE_BTFIDS_FLAGS="--distill_base"
+    export objtree="$PWD"
+    if (( ${#MAKEVARS[@]} )); then export OBJCOPY="llvm-objcopy"
+    else export OBJCOPY="objcopy"; fi
+
+    log "generating module BTF the way the kernel does (pahole ${pver:-?})"
+    bash "$genbtf" --btf_base /sys/kernel/btf/vmlinux "$ko" \
+        || { warn "BTF generation failed, continuing without it"; return 0; }
+
+    # The kernel rejects a module outright when its .BTF is invalid, so
+    # verify before installing: the BTF must parse with no consistency
+    # errors. If it does not, drop the BTF sections — a BTF-less module
+    # loads fine.
+    if ! pahole -F dwarf --btf_base /sys/kernel/btf/vmlinux "$ko" \
+            >/dev/null 2>"${WORKDIR}/btfcheck.err"; then
+        if grep -qE 'is not FUNC_PROTO|has no btf type information|Failed to load BTF' \
+                "${WORKDIR}/btfcheck.err"; then
+            warn "generated BTF is invalid, stripping it so the module stays loadable"
+            "$OBJCOPY" --remove-section=.BTF --remove-section=.BTF.base \
+                --remove-section=.BTF_ids "$ko" \
+                || warn "could not strip invalid BTF"
+        else
+            warn "BTF check output: $(head -3 "${WORKDIR}/btfcheck.err")"
+        fi
+    else
+        log "module BTF parses cleanly"
+    fi
+    rm -f "${WORKDIR}/btfcheck.err"
+}
+
+gen_module_btf "$KO"
 
 log "stripping and compressing"
 if command -v llvm-strip >/dev/null; then llvm-strip --strip-debug "$KO"

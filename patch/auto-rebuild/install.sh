@@ -66,9 +66,10 @@ cat <<EOF
   ${LIB_DIR}/deferred.sh
   ${CONF}
 
-  From now on a kernel update rebuilds patch/headset-mic/ and
-  patch/sof-audio/ for the new kernel automatically, and a libfprint
-  update re-applies patch/fingerprint/ shortly after the transaction.
+  From now on a kernel update rebuilds patch/headset-mic/,
+  patch/sof-audio/ and patch/cdclk-ptl/ for the new kernel automatically,
+  and a libfprint update re-applies patch/fingerprint/ shortly after the
+  transaction.
 
   Log: /var/log/honor-zqcp-autorebuild.log
 

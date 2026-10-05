@@ -16,6 +16,7 @@ sudo bash patch/auto-rebuild/install.sh
 |---|---|---|
 | [`headset-mic/`](../headset-mic/) | `snd-hda-codec-alc269.ko` | any kernel package update |
 | [`sof-audio/`](../sof-audio/) | `snd-sof.ko` | any kernel package update |
+| [`cdclk-ptl/`](../cdclk-ptl/) | `xe.ko` | any kernel package update |
 | [`fingerprint/`](../fingerprint/) | `libfprint` | any libfprint update |
 
 The other fixes need nothing: the ACPI override is a firmware file, the
@@ -38,7 +39,7 @@ hook fills in.
 
 | Hook | Trigger | Action |
 |---|---|---|
-| `95-…-kernel-modules` | any `usr/lib/modules/*/vmlinuz` installed or upgraded | rebuilds `headset-mic` and `sof-audio` for each kernel named in the transaction, in `PostTransaction` |
+| `95-…-kernel-modules` | any `usr/lib/modules/*/vmlinuz` installed or upgraded | rebuilds `headset-mic`, `sof-audio` and `cdclk-ptl` for each kernel named in the transaction, in `PostTransaction` |
 | `96-…-libfprint` | `libfprint` installed or upgraded | re-applies the fingerprint patch |
 
 Neither rebuild runs inside the transaction. Both are handed to a transient
@@ -71,6 +72,12 @@ always exits 0, so a failure reports itself without breaking the transaction.
 - The rebuild fetches sources from `raw.githubusercontent.com`. Without
   network, it logs the failure and the fix is simply missing until you re-run
   it.
+- `cdclk-ptl` is the expensive one: each kernel update downloads the ~260 MB
+  source tarball and compiles `xe.ko`, then regenerates the boot image so the
+  patched module reaches early KMS. That cost disappears only once the fix
+  lands upstream — then delete `patch/cdclk-ptl/`, drop `cdclk-ptl` from the
+  loop in `deferred.sh`, delete the stale `updates/xe.ko.zst`, and re-run
+  `install.sh`.
 
 ## Trying it without waiting for an update
 

@@ -1,4 +1,4 @@
-# Fixes for HONOR MagicBook Pro 14 AI (ZQC-P / M1010)
+# Fixes for HONOR MagicBook Pro 14 AI (ZQC-P / M1010 or M1050)
 
 Each subdirectory is one self-contained fix: the patch or source it needs, an
 `install.sh`, and a `README.md` explaining what is broken and why the fix looks
@@ -15,6 +15,7 @@ kernel 7.1.5.
 | Touchpad, touchscreen, internal keyboard | works | [`acpi-override/`](acpi-override/) — patched SSDT27 plus `i8042.dumbkbd=1`. **Prerequisite for a usable machine** |
 | Microphone mutes itself, mic-mute LED flickers | works | [`micmute/`](micmute/) — HID-BPF fixup for the touchscreen's vendor collection |
 | Fingerprint reader, Goodix `27c6:6f94` | works | [`fingerprint/`](fingerprint/) — two-line `libfprint` id patch |
+| Fingerprint reader, EgisTec `1c7a:05aa` (Ultra 5 338H) | works | [`fingerprint-egismoc/`](fingerprint-egismoc/) — SDCP-capable `libfprint` build with an ET171 init skip |
 | Headset microphone, 3.5 mm jack | works | [`headset-mic/`](headset-mic/) — one-line `SND_PCI_QUIRK` for ALC256 |
 | OLED minimum brightness too low, uneven steps | works | [`oled-backlight/`](oled-backlight/) — patched VBT raises the firmware's backlight floor |
 | Touchpad left-edge slide does nothing | works | [`touchpad-edge/`](touchpad-edge/) — HID-BPF turns the vendor gesture report into brightness keys |
@@ -60,7 +61,8 @@ hand. `apply_patch.sh` installs it as its last step.
 | `headset-mic/` | a kernel update leaves the new kernel without the overlay | `auto-rebuild/` hook |
 | `sof-audio/` | same | `auto-rebuild/` hook |
 | `fingerprint/` | a libfprint update replaces the patched package | `auto-rebuild/` hook |
-| `cdclk-ptl/` | a kernel update leaves the new kernel without the overlay | re-run `install.sh`, deliberately not hooked |
+| `fingerprint-egismoc/` | nothing — it is a separate package in a private libdir, independent of the system libfprint | — (hook re-runs exit early) |
+| `cdclk-ptl/` | a kernel update leaves the new kernel without the overlay | `auto-rebuild/` hook |
 
 Without the hooks, re-run `headset-mic/install.sh` and `sof-audio/install.sh`
 after every kernel update, and `fingerprint/install.sh` after every libfprint
@@ -81,6 +83,8 @@ Two of these are small enough to belong in the projects themselves, and the
 repo should shrink as they land:
 
 - the `libfprint` id addition for Goodix `27c6:6f94`
+- the ET171 `1c7a:05aa` support series in [`fingerprint-egismoc/`](fingerprint-egismoc/)
+  (plus the SDCP branch it builds on, libfprint MR !547)
 - the `SND_PCI_QUIRK` entry for PCI SSID `1ee7:209d`
 
 [`cdclk-ptl/`](cdclk-ptl/) carries an upstream patch verbatim and should be

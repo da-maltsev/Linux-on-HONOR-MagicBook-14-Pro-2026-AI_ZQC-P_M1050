@@ -138,4 +138,5 @@ echo "floor are reverted too."
 echo
 echo "Not touched, remove separately if you want them gone:"
 echo "  fan sensor   sudo dkms remove honor-zqcp-hwmon/1.0 --all"
-echo "  fingerprint  sudo pacman -S libfprint    # replaces the patched build"
+echo "  fingerprint (Goodix)  sudo pacman -S libfprint          # replaces the patched build"
+echo "  fingerprint (Egis)    sudo pacman -R honor-fmbp-libfprint-sdcp  # drops the SDCP libfprint build"

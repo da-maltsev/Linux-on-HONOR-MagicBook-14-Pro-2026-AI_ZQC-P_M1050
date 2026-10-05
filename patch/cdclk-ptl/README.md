@@ -124,7 +124,7 @@ does not improvise:
 | release suffix | `localversion.*` from `/usr/lib/modules/$KVER/build/` |
 | toolchain | clang and lld when `CONFIG_CC_IS_CLANG=y`, as CachyOS builds |
 | external symbols | `Module.symvers` from the installed headers |
-| module BTF | `pahole --btf_base /sys/kernel/btf/vmlinux` |
+| module BTF | `scripts/gen-btf.sh` with the kernel's own `PAHOLE_FLAGS` + `resolve_btfids`, verified parseable before install (a bare `pahole -J` produces BTF the kernel rejects with `-EINVAL`) |
 
 `MODULE_SIG_ALL` is turned off for the build, since the distro signing key is
 not available. That is harmless here: `MODULE_SIG_FORCE` is unset and Secure
@@ -171,8 +171,11 @@ sudo limine-mkinitcpio
 ## After a kernel update
 
 A new kernel version gets a fresh module directory with no `updates/` entry,
-so the fix is gone and the next boot is back to the stock behaviour. Rerun
-`install.sh`. This one is deliberately **not** wired into the
-[`auto-rebuild`](../auto-rebuild/) pacman hooks: it would mean a 260 MB
-download and a multi-minute compile inside every kernel upgrade transaction,
-and the whole thing becomes obsolete the moment the fix lands upstream.
+so the fix is gone and the next boot is back to the stock behaviour. Since the
+[`auto-rebuild`](../auto-rebuild/) pacman hook rebuilds this fix too, nothing
+has to be done by hand: after each kernel update it downloads the source,
+rebuilds `xe.ko` and regenerates the boot image. That is a ~260 MB download
+and a multi-minute compile per update, and the whole thing becomes obsolete
+the moment the fix lands upstream — then delete this directory, remove
+`cdclk-ptl` from the loop in `patch/auto-rebuild/deferred.sh`, delete the stale
+`updates/xe.ko.zst`, and re-run `patch/auto-rebuild/install.sh`.

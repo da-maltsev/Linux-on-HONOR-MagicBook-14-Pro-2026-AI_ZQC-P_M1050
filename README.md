@@ -10,12 +10,13 @@ own README, measurements, and installer.
 > with M1010) and stock Arch / Omarchy (the original was developed on CachyOS).
 > Changes:
 > * [`patch/fingerprint-egismoc/`](patch/fingerprint-egismoc/) — the 338H SKU
->   ships an Egis/LighTuning `1c7a:05aa` reader instead of the Goodix
->   `27c6:6f94` the Ultra 7/9 units carry. **That reader is not supported yet**
->   (it stalls during device open; its init sequence is not reverse-engineered).
->   `apply_patch.sh` detects it at step [13/14] and skips with an explanation;
->   `apply_patch.sh` also auto-detects the working Goodix reader for Ultra 7/9
->   units.
+>   ships an Egis/LighTuning `1c7a:05aa` (EgisTec ET171) reader instead of the
+>   Goodix `27c6:6f94` the Ultra 7/9 units carry. The ET171 is SDCP-gated and
+>   STALLs on the vendor control-init every other egismoc sensor accepts, so it
+>   needs a per-sensor init skip on top of the SDCP-capable build — a port of
+>   drphilth/honor-fmbp-libfprint-sdcp, **hardware-verified on this unit**.
+>   `apply_patch.sh` detects the reader at step [13/14] and runs the matching
+>   installer.
 > * Omarchy boots a UKI via `limine-mkinitcpio`, and its `omarchy_hooks.conf`
 >   drop-in overrides the base `HOOKS=`. The original script edited
 >   `/etc/mkinitcpio.conf` (which the drop-in ignores), so the ACPI override
@@ -31,7 +32,8 @@ own README, measurements, and installer.
 |---|---|---|
 | Touchpad, touchscreen, internal keyboard | works | [`patch/acpi-override/`](patch/acpi-override/) — patched SSDT27 plus `i8042.dumbkbd=1`. **Prerequisite for a usable machine** |
 | Microphone mutes itself, mic-mute LED flickers | works | [`patch/micmute/`](patch/micmute/) — HID-BPF fixup for the touchscreen's vendor collection |
-| Fingerprint reader, Goodix `27c6:6f94` | works | [`patch/fingerprint/`](patch/fingerprint/) — two-line `libfprint` id patch. **Ultra 5 338H SKU only has the Egis `1c7a:05aa`, which is not supported yet** — see [`patch/fingerprint-egismoc/`](patch/fingerprint-egismoc/) |
+| Fingerprint reader, Goodix `27c6:6f94` | works | [`patch/fingerprint/`](patch/fingerprint/) — two-line `libfprint` id patch |
+| Fingerprint reader, EgisTec `1c7a:05aa` (Ultra 5 338H) | works | [`patch/fingerprint-egismoc/`](patch/fingerprint-egismoc/) — SDCP-capable `libfprint` build (`feature/sdcp-v2` + init skip), hardware-verified on this unit |
 | Headset microphone, 3.5 mm jack | works | [`patch/headset-mic/`](patch/headset-mic/) — one-line `SND_PCI_QUIRK` for ALC256 |
 | OLED minimum brightness too low, uneven steps | works | [`patch/oled-backlight/`](patch/oled-backlight/) — patched VBT raises the firmware's backlight floor |
 | Touchpad left-edge slide (brightness gesture) | works | [`patch/touchpad-edge/`](patch/touchpad-edge/) — HID-BPF turns the vendor gesture report into brightness keys. The right edge (volume) goes through the EC and works unaided |
@@ -63,6 +65,7 @@ Bluetooth all work with no changes.
 | **Touchpad** | Goodix **TOPS0102** on `\_SB.PC00.I2C1.TPD0` (I²C HID, addr `0x5D`) |
 | **Touchscreen** | FocalTech **FTSC1000** on `\_SB.PC00.I2C2.TPL1` (I²C HID) |
 | **Fingerprint** | Goodix USB `27c6:6f94` — works with a two-line `libfprint` patch, see [`patch/fingerprint/`](patch/fingerprint/) |
+| **Fingerprint (Ultra 5 338H SKU)** | EgisTec/LighTuning USB `1c7a:05aa` (ET171) — SDCP-gated, needs the build in [`patch/fingerprint-egismoc/`](patch/fingerprint-egismoc/) |
 | **Webcam (built-in)** | Shinetech FHD over USB (`3277:00de`) — works out of the box |
 
 Both touch devices are advertised in firmware with `_HID/_CID = PNP0C50`
@@ -147,8 +150,8 @@ sudo bash patch/touchpad-edge/install.sh
 | 10 | Runs `patch/micmute/install.sh` — builds and installs the HID-BPF descriptor fixup through `udev-hid-bpf` |
 | 11 | Runs `patch/touchpad-edge/install.sh` — HID-BPF program for the left-edge brightness gesture |
 | 12 | Runs `patch/fan/install.sh` — `honor-zqcp-hwmon`, EC fan tachometers, through DKMS |
-| 13 | Runs `patch/fingerprint/install.sh` — rebuilds `libfprint` with the Goodix `27c6:6f94` id |
-| 14 | Runs `patch/auto-rebuild/install.sh` — pacman hooks that keep steps 8, 9 and 13 applied across package updates |
+| 13 | Runs `patch/fingerprint/install.sh` or `patch/fingerprint-egismoc/install.sh` depending on the reader — rebuilds `libfprint` with the Goodix `27c6:6f94` id, or installs the SDCP-capable build for the EgisTec ET171 `1c7a:05aa` |
+| 14 | Runs `patch/auto-rebuild/install.sh` — pacman hooks that keep steps 8, 9 and 13 applied across package updates (the Egis build is a separate package, so the hook exits early once it is installed) |
 
 Steps 8 and 9 are skipped with a warning if kernel lockdown or
 `module.sig_enforce=1` would block an unsigned module. Steps 13 and 14 are
@@ -179,6 +182,9 @@ sudo dmesg | grep 'picked fixup.*1ee7:209d'
 
 # fan RPM readout
 sensors | grep -A3 honor_zqcp
+
+# fingerprint reader usable (Egis 1c7a:05aa or Goodix 27c6:6f94)
+fprintd-list "$USER"
 ```
 
 ### Surviving package updates
@@ -397,6 +403,12 @@ HONOR_ZQC-P_M1010/
 │   │   ├── libfprint-goodixmoc-honor-zqc-p-6f94.patch
 │   │   ├── PKGBUILD                #   pacman-owned rebuild, avoids file conflicts
 │   │   └── install.sh
+│   ├── fingerprint-egismoc/        # EgisTec ET171 1c7a:05aa — SDCP libfprint build
+│   │   ├── 0001-egismoc-add-EgisTec-ET171-1c7a-05aa-support.patch
+│   │   ├── 0002-sdcp-mark-identified-print-as-device-stored.patch
+│   │   ├── 0003-egismoc-guard-against-short-interrupt-packets-and-fi.patch
+│   │   ├── PKGBUILD                #   feature/sdcp-v2 + series, private libdir
+│   │   └── install.sh / README.md
 │   └── fan/                        # honor-zqcp-hwmon — EC fan tachometers (read-only)
 │       ├── honor-zqcp-hwmon.c
 │       ├── Makefile / dkms.conf

@@ -1,68 +1,113 @@
-# Fingerprint reader — Egis 1c7a:05aa (Ultra 5 338H SKU) — NOT SUPPORTED YET
+# Fingerprint reader — EgisTec ET171 `1c7a:05aa` (Ultra 5 338H SKU)
 
-**Status: does not work.** The device is detected and probes cleanly, but
-`fprintd-enroll` fails during device **open**:
+**Status: works.** Enroll, verify/identify (match and non-match) and
+suspend/resume reconnect are verified on this unit. This directory is the
+direct descendant of the previous "NOT SUPPORTED YET" state — the git history
+shows the failed experiment on the TenSeventy7 SDCP fork.
+
+The reader is the EgisTec/LighTuning **ET171** (`1c7a:05aa`,
+"Egistec-ETU906Axx") match-on-chip sensor on USB. The power button *is* the
+sensor. It speaks Microsoft SDCP (the Windows Hello protocol), so stock
+libfprint's `egismoc` driver cannot talk to it: without SDCP, enrollment
+"completes" but the first verify finds 0 prints.
+
+## Why the earlier attempt failed
+
+The first port built the TenSeventy7 `libfprint-egismoc-sdcp` fork and added
+`0x05aa` to the id table. It got past the id table but `egismoc_open()`
+STALLed on the fork's hard-coded vendor **init control transfers**
+(`egismoc_dev_init_handler`: `bRequest=32` ×2, `bRequest=82`, plus two standard
+GET_STATUS probes), so open failed with:
 
 ```
 failed to claim device: GDBus.Error:net.reactivated.Fprint.Error.Internal:
 Open failed with error: endpoint stalled or request not supported
 ```
 
-Everything in this directory builds and installs fine — the reader just
-cannot be opened. Kept here as the starting point for whoever picks the
-reverse-engineering up.
+The id-table `TYPE1`/`TYPE2` flag (the only knob the first attempt had) selects
+a prefix inside a later bulk "check" command, not the open path, so it could
+not help.
 
-## Where exactly it fails
+## The working recipe
 
-`egismoc_open()` runs a hard-coded vendor **control-transfer init sequence**
-(`egismoc_dev_init_handler`: vendor requests `bRequest=32` ×2 and `bRequest=82`,
-plus two standard GET_STATUS probes). The 05aa sensor STALLs one of those
-vendor requests.
+Ported from [drphilth/honor-fmbp-libfprint-sdcp](https://github.com/drphilth/honor-fmbp-libfprint-sdcp),
+which reverse-engineered the same sensor on the 2025 FMB-P and whose patch
+series is proposed for upstream inclusion. It builds **upstream libfprint's**
+`feature/sdcp-v2` branch (MR [!547](https://gitlab.freedesktop.org/libfprint/libfprint/-/merge_requests/547))
+at a pinned commit (`2d7c527`) — the SDCP implementation — plus three patches:
 
-Consequences:
+1. `0001` — add `1c7a:05aa` with a new `EGISMOC_DRIVER_SKIP_CONTROL_INIT` flag.
+   This is the fix for the stall: the ET171 does **not** implement the vendor
+   control-init transfers, and the driver now skips straight to the
+   firmware-version command. That matches the Windows driver, whose USB
+   captures contain no such transfers. The patch also sends the SDCP-init
+   (`50 19 04`) *before* connect (without it the firmware floods the 0x83
+   interrupt endpoint with a debug log and finger-status never gets through),
+   sets 15 enroll stages and prefix check type 2.
+2. `0002` — SDCP core: mark the identified print as `device_stored`, otherwise
+   every successful match fails with `verify-unknown-error`.
+3. `0003` — robustness fixes: a short-interrupt-packet length guard (this
+   sensor streams firmware-log fragments over the interrupt endpoint) and only
+   a confirmed match (SW 90 00) counts as a duplicate during enrollment.
 
-* The `TYPE1`/`TYPE2` id-table flag (this patch's only knob) **cannot help** —
-  it selects a prefix inside a later bulk "check" command, not the open path.
-* The sibling sensor `1c7a:05a5` (ETU906Axx-**E**) *does* work with this same
-  fork — it opens, and only needs SDCP for enrollment. So `05aa` is a distinct
-  firmware/protocol revision, not just a missing table entry.
-* No existing support anywhere: upstream libfprint, the TenSeventy7 fork, and
-  the community hubs all lack `05aa`. The Windows driver INF for it is
-  `egistouchfp05aa.inf`.
+`0100` is a packaging-only patch that drops the unshipped test/example builds.
 
-## What fixing it would take
+## What ships here
 
-1. Boot Windows on the machine, install Wireshark + USBPcap.
-2. Capture the USB traffic while Windows Hello initializes the sensor — focus
-   on the control transfers right after interface claim (the equivalents of
-   `DEV_INIT_CONTROL1..5`).
-3. Diff against the sequence in `egismoc.c`; add a per-id init variant keyed
-   off `driver_data`, then re-test open → SDCP connect → enroll.
+* `0001..0003` — the ET171 patch series (as above).
+* `0100` — packaging-only meson trim.
+* `PKGBUILD` / `install.sh` — build the pinned `feature/sdcp-v2` libfprint with
+  the series as a pacman-owned package named `honor-fmbp-libfprint-sdcp`.
+* `honor-fmbp-libfprint-sdcp.install` — pacman hook script (ldconfig + fprintd
+  restart).
 
-The rs0x29a repo author did the same class of work for this laptop's touchpad
-(see `reference/` and `win11_dump/`), so the workflow is proven on this unit.
+The package installs **only** the runtime library into `/usr/lib/honor-fmbp/`
+plus an `/etc/ld.so.conf.d/000-honor-fmbp-fprint.conf` entry that sorts ahead
+of the default paths, so our SDCP-capable `libfprint-2.so.2` wins for fprintd
+while the stock libfprint package stays installed and untouched. `pacman -R
+honor-fmbp-libfprint-sdcp` falls back to stock with no other change. Because it
+is independent of the system libfprint, a package update never reverts it, and
+the `auto-rebuild` hook's re-run of `install.sh` exits early (idempotent).
 
-## What ships here anyway
-
-* `libfprint-egismoc-honor-zqc-p-05aa.patch` — adds `0x05aa`
-  (`EGISMOC_DRIVER_CHECK_PREFIX_TYPE2`) to the egismoc id table and links
-  OpenSSL for the egismoc driver in `meson.build`.
-* `PKGBUILD` / `install.sh` — build the TenSeventy7 SDCP fork as a
-  pacman-owned package with that patch. They work; the result just cannot
-  open this particular sensor yet.
-
-`apply_patch.sh` detects the reader at step [13/14] and skips the build with an
-explanation. To experiment regardless:
+## Install
 
 ```sh
-sudo EGISMOC_EXPERIMENTAL=1 bash patch/fingerprint-egismoc/install.sh
+sudo bash patch/fingerprint-egismoc/install.sh
 ```
 
-(Revert afterwards with `sudo pacman -S libfprint`.)
+## Verify
 
-## References
+```sh
+fprintd-enroll -f right-index-finger     # the ET171 wants ~15 touches
+fprintd-verify
+sudo ldconfig -p | grep libfprint-2.so.2 # /usr/lib/honor-fmbp/... must be listed FIRST
+```
 
-- https://github.com/TenSeventy7/libfprint-egismoc-sdcp
-- https://gist.github.com/bidual/193e2878ca4b5e1dd02427eb23783a4a (working sibling 05a5)
-- https://github.com/antoskuu/libfprint-egismoc-sdcp-fix (SDCP background + OpenSSL linkage fix)
-- https://gitlab.freedesktop.org/libfprint/libfprint/-/issues/569
+## PAM / lock screen
+
+* **KDE**: lock-screen unlock works with no PAM edits — Plasma ships a
+  `kde-fingerprint` stack. The *login* screen does not support fingerprint;
+  that is an upstream gap ([plasma-login-manager#1](https://invent.kde.org/plasma/plasma-login-manager/-/issues/1)),
+  not a misconfiguration. The PAM workaround for it breaks KWallet — don't.
+* **GNOME**: enable fingerprint login in Users settings.
+* **sudo / login**: add one `auth sufficient pam_fprintd.so` line above
+  `pam_unix.so` in the matching `/etc/pam.d/` files.
+
+## Caveats
+
+* **Dual-booting Windows wipes your Linux enrollments.** The Windows biometric
+  stack garbage-collects on-chip templates it does not recognise (verified
+  experimentally upstream). The fix is disabling the fingerprint device in
+  Windows's Device Manager if you dual-boot.
+* `~15` touches to enroll; the sensor reports `enroll-remove-and-retry` /
+  `enroll-finger-not-centered` freely, that is normal.
+* Only the ET171 (`1c7a:05aa`) variant is covered by this directory. Other Egis
+  sensors (`1c7a:058x`/`05a1`/`05a5` etc.) use the standard egismoc control
+  init and do not need the `SKIP_CONTROL_INIT` flag.
+
+## Upstream status
+
+Not merged yet: MR !547 (SDCP) and the ET171 patch series are both pending in
+libfprint, so this package stays in the repo until they land in a release. The
+series tracks `drphilth/honor-fmbp-libfprint-sdcp`; re-check that repo for
+newer revisions before bumping the pinned commit here.

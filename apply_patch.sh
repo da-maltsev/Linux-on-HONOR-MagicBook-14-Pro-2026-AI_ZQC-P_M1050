@@ -85,13 +85,12 @@
 #      stub. Step [12/14] installs a small hwmon module that reads the EC
 #      registers directly. Read-only, the EC owns the curve.
 #      See patch/fan/.
-#  10) The fingerprint reader is missing from libfprint's id table. The
-#      reader differs by SKU: Goodix 27c6:6f94 (Ultra 7/9) is a two-line
-#      id patch, while Egis 1c7a:05aa (Ultra 5 338H) is NOT SUPPORTED YET
-#      — its init control sequence differs from every known egismoc sensor
-#      and needs reverse-engineering. Step [13/14] detects the SKU: Goodix
-#      gets patched, 05aa is skipped with an explanation. See
-#      patch/fingerprint/ and patch/fingerprint-egismoc/.
+#  10) The fingerprint reader is missing from libfprint. The reader differs
+#      by SKU: Goodix 27c6:6f94 (Ultra 7/9) is a two-line id patch, while
+#      EgisTec 1c7a:05aa (Ultra 5 338H) needs the SDCP-capable build plus a
+#      per-sensor init skip (it STALLs on the vendor control-init every other
+#      egismoc sensor accepts). Step [13/14] detects the SKU and runs the
+#      matching installer. See patch/fingerprint/ and patch/fingerprint-egismoc/.
 #  11) The fixes in steps [8/14] and [9/14] live inside kernel modules that
 #      a kernel package update replaces, and the fingerprint patch lives
 #      in libfprint, which a libfprint update replaces. Step [14/14]
@@ -428,19 +427,17 @@ else
 fi
 
 #────────────────────────────────────────────────────────────────────────
-# [13/14] Rebuild libfprint with the fingerprint id added, as a pacman-owned
-# package so it does not conflict on the next update. This is the slowest
-# step by far: it downloads the libfprint sources and builds them.
-# Set SKIP_FINGERPRINT=1 to skip.
+# [13/14] Rebuild libfprint with the fingerprint reader added, as a
+# pacman-owned package so it does not conflict on the next update. This is
+# the slowest step by far: it downloads the libfprint sources and builds
+# them. Set SKIP_FINGERPRINT=1 to skip.
 #
 # The reader differs by SKU:
 #   * Goodix 27c6:6f94 (Ultra 7/9 units)     → patch/fingerprint/
-#   * Egis  1c7a:05aa (Ultra 5 338H units)   → NOT SUPPORTED YET
-#     The device probes fine but stalls during open: its vendor init
-#     control-transfer sequence differs from every egismoc sensor the
-#     SDCP fork knows, so no id-table flag can fix it. It needs a USB
-#     capture under Windows first — see patch/fingerprint-egismoc/README.md.
-#     Set EGISMOC_EXPERIMENTAL=1 to attempt the build anyway.
+#   * Egis  1c7a:05aa (Ultra 5 338H units)   → patch/fingerprint-egismoc/
+#     The ET171 is SDCP-gated and STALLs on the vendor control-init every
+#     other egismoc sensor accepts; the build here skips that init and is
+#     hardware-verified on this unit. See patch/fingerprint-egismoc/README.md.
 #────────────────────────────────────────────────────────────────────────
 echo "[13/14] Fingerprint reader (libfprint id patch)"
 if [[ "${SKIP_FINGERPRINT:-0}" == "1" ]]; then
@@ -448,13 +445,8 @@ if [[ "${SKIP_FINGERPRINT:-0}" == "1" ]]; then
 elif ! command -v makepkg >/dev/null; then
     echo "    skipped — makepkg not found, not a pacman system"
 elif lsusb -d 1c7a:05aa >/dev/null 2>&1; then
-    echo "    detected Egis 1c7a:05aa reader (Ultra 5 338H SKU)"
-    if [[ "${EGISMOC_EXPERIMENTAL:-0}" != "1" ]]; then
-        echo "    UNSUPPORTED: this sensor stalls during open ('endpoint stalled') —"
-        echo "    its init control sequence is not reverse-engineered yet."
-        echo "    Skipping the build; see patch/fingerprint-egismoc/README.md"
-        echo "    for what is known and set EGISMOC_EXPERIMENTAL=1 to try anyway."
-    elif bash "$PATCH_DIR/fingerprint-egismoc/install.sh"; then
+    echo "    detected Egis 1c7a:05aa reader (Ultra 5 338H SKU, ET171)"
+    if bash "$PATCH_DIR/fingerprint-egismoc/install.sh"; then
         echo "    OK"
     else
         echo "    [warn] libfprint (egismoc) rebuild failed — earlier steps still"
@@ -489,9 +481,7 @@ elif ! command -v pacman >/dev/null; then
     echo "    and patch/sof-audio/install.sh after every kernel update."
 else
     echo "    [warn] hook install failed — the fixes still work, but a kernel"
-    echo "    update will revert steps [8/14] and [9/14] until you re-run them."
-    echo "    Step [6/14] is not hooked either: rerun it by hand after a"
-    echo "    kernel update, or drop it once the fix lands upstream."
+    echo "    update will revert steps [6/14], [8/14] and [9/14] until you re-run them."
 fi
 
 cat <<EOF
