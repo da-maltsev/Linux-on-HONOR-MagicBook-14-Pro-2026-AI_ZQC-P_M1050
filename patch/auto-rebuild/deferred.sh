@@ -37,7 +37,7 @@ modules)
             w "${k}: no kernel headers, skipped"
             continue
         fi
-        for fix in headset-mic sof-audio; do
+        for fix in headset-mic; do
             rc=0
             KVER="$k" bash "${REPO}/patch/${fix}/install.sh" >>"$LOG" 2>&1 || rc=$?
             case "$rc" in

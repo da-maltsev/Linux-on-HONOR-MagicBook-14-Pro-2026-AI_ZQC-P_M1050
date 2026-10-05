@@ -53,7 +53,7 @@ rm -f /etc/systemd/system/honor-mic-jack-init.service \
       /usr/local/bin/honor-mic-jack-init.sh
 systemctl daemon-reload 2>/dev/null || true
 
-echo "[5/11] Remove SOF IPC4 fix overlay (if present)"
+echo "[5/11] Remove a legacy SOF IPC4 overlay (older versions of this repo installed one)"
 SOF_OVERLAY="/usr/lib/modules/${KVER}/updates/snd-sof.ko.zst"
 SOF_BACKUP="/root/snd-sof.ko.zst.orig"
 if [[ -f "$SOF_OVERLAY" ]]; then
@@ -129,8 +129,6 @@ echo
 echo "Done. Reboot to fully revert. Touchpad/touchscreen will be unavailable"
 echo "again until apply_patch.sh is re-run or a different fix is installed."
 echo "Analog 3.5mm-jack headset mic input will also disappear."
-echo "SOF DSP will fall back to the in-tree (unpatched) module — expect"
-echo "occasional DSP panics on suspend/resume per thesofproject/sof#10700."
 echo "The touchscreen's vendor HID collection will be exported as a phantom"
 echo "KEY_MICMUTE device again, so the mic will start muting itself."
 echo "The touchpad left-edge brightness gesture and the raised OLED backlight"

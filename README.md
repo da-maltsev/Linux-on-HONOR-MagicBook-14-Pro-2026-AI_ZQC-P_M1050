@@ -15,14 +15,14 @@ own README, measurements, and installer.
 >   STALLs on the vendor control-init every other egismoc sensor accepts, so it
 >   needs a per-sensor init skip on top of the SDCP-capable build — a port of
 >   drphilth/honor-fmbp-libfprint-sdcp, **hardware-verified on this unit**.
->   `apply_patch.sh` detects the reader at step [13/14] and runs the matching
+>   `apply_patch.sh` detects the reader at step [12/13] and runs the matching
 >   installer.
 > * Omarchy boots a UKI via `limine-mkinitcpio`, and its `omarchy_hooks.conf`
 >   drop-in overrides the base `HOOKS=`. The original script edited
 >   `/etc/mkinitcpio.conf` (which the drop-in ignores), so the ACPI override
 >   never reached the boot image and the touchpad stayed dead. `apply_patch.sh`
 >   now patches the drop-ins too and verifies the SSDT landed in the UKI.
-> * `headset-mic`, `sof-audio` and `cdclk-ptl` no longer assume a clang-built
+> * `headset-mic` and `cdclk-ptl` no longer assume a clang-built
 >   kernel or a CachyOS-style release string; they detect the toolchain and
 >   sync `EXTRAVERSION` from the running kernel's Makefile.
 
@@ -30,7 +30,8 @@ own README, measurements, and installer.
 
 | Area | State | Fix |
 |---|---|---|
-| Touchpad, touchscreen, internal keyboard | works | [`patch/acpi-override/`](patch/acpi-override/) — patched SSDT27 plus `i8042.dumbkbd=1`. **Prerequisite for a usable machine** |
+| Touchpad, touchscreen | works | [`patch/acpi-override/`](patch/acpi-override/) — patched SSDT27. **Prerequisite for a usable machine** |
+| Internal keyboard, Caps Lock LED | works out of the box on kernel 7.1.10+ | in-tree `atkbd` DMI quirk for ZQC-P. Older kernels need `i8042.dumbkbd=1`, which `apply_patch.sh` adds only there, and the Caps Lock LED stays dark |
 | Microphone mutes itself, mic-mute LED flickers | works | [`patch/micmute/`](patch/micmute/) — HID-BPF fixup for the touchscreen's vendor collection |
 | Fingerprint reader, Goodix `27c6:6f94` | works | [`patch/fingerprint/`](patch/fingerprint/) — two-line `libfprint` id patch |
 | Fingerprint reader, EgisTec `1c7a:05aa` (Ultra 5 338H) | works | [`patch/fingerprint-egismoc/`](patch/fingerprint-egismoc/) — SDCP-capable `libfprint` build (`feature/sdcp-v2` + init skip), hardware-verified on this unit |
@@ -40,9 +41,7 @@ own README, measurements, and installer.
 | Screen garbled at boot, kernel 7.1.6 and newer | works, opt-in | [`patch/cdclk-ptl/`](patch/cdclk-ptl/) — rebuilds `xe.ko` with the upstream CDCLK fix that Panther Lake needs and that is not merged yet |
 | Fan RPM readout | works | [`patch/fan/`](patch/fan/) — `honor-zqcp-hwmon` |
 | Fan control | not available | the EC owns the fan curve and ignores every OS-side path, see [`patch/fan/README.md`](patch/fan/README.md) |
-| SOF DSP suspend/resume panic | preventive | [`patch/sof-audio/`](patch/sof-audio/) — upstream IPC4 backport, the race never reproduced here |
 | Fixes reverted by package updates | handled | [`patch/auto-rebuild/`](patch/auto-rebuild/) — pacman hooks that rebuild them |
-| Caps Lock LED | dark | collateral of `i8042.dumbkbd=1`; an upstream `atkbd` quirk removes both, see [`patch/keyboard-atkbd/`](patch/keyboard-atkbd/) |
 | Fn+F7 mic-mute key itself | works out of the box | in-tree `huawei-wmi`, nothing to install |
 
 Speakers, headphone output, the built-in DMIC array, webcam, Wi-Fi and
@@ -141,20 +140,19 @@ sudo bash patch/touchpad-edge/install.sh
 | 1 | Backs up everything about to be touched |
 | 2 | Installs `patch/acpi-override/SSDT27_TPD0.aml` into `/usr/lib/firmware/acpi/` and the `acpi_override` mkinitcpio hook |
 | 3 | Adds `acpi_override` to `HOOKS=` in `/etc/mkinitcpio.conf`, right after `autodetect` |
-| 4 | Appends `i8042.dumbkbd=1` to the kernel cmdline in `/etc/default/limine` |
+| 4 | Removes `i8042.dumbkbd=1` from `/etc/default/limine` on kernel 7.1.10+ (adds it on older kernels), and a leftover `snd-sof.ko` overlay from earlier versions of this repo |
 | 5 | Runs `patch/oled-backlight/install.sh` — patched VBT, `FILES=` entry and `xe.vbt_firmware=` on the cmdline |
 | 6 | Runs `patch/cdclk-ptl/install.sh` — rebuilds `xe.ko` with the Panther Lake cdclk fix, into the `updates/` overlay. Only with `WITH_CDCLK=1` |
 | 7 | Regenerates the initramfs and the bootloader config, once, after all the config edits |
 | 8 | Runs `patch/headset-mic/install.sh` — rebuilds `snd-hda-codec-alc269.ko` with the ALC256 quirk for PCI SSID `1ee7:209d` |
-| 9 | Runs `patch/sof-audio/install.sh` — builds `snd-sof.ko` with the IPC4 backport into the `updates/` overlay |
-| 10 | Runs `patch/micmute/install.sh` — builds and installs the HID-BPF descriptor fixup through `udev-hid-bpf` |
-| 11 | Runs `patch/touchpad-edge/install.sh` — HID-BPF program for the left-edge brightness gesture |
-| 12 | Runs `patch/fan/install.sh` — `honor-zqcp-hwmon`, EC fan tachometers, through DKMS |
-| 13 | Runs `patch/fingerprint/install.sh` or `patch/fingerprint-egismoc/install.sh` depending on the reader — rebuilds `libfprint` with the Goodix `27c6:6f94` id, or installs the SDCP-capable build for the EgisTec ET171 `1c7a:05aa` |
-| 14 | Runs `patch/auto-rebuild/install.sh` — pacman hooks that keep steps 8, 9 and 13 applied across package updates (the Egis build is a separate package, so the hook exits early once it is installed) |
+| 9 | Runs `patch/micmute/install.sh` — builds and installs the HID-BPF descriptor fixup through `udev-hid-bpf` |
+| 10 | Runs `patch/touchpad-edge/install.sh` — HID-BPF program for the left-edge brightness gesture |
+| 11 | Runs `patch/fan/install.sh` — `honor-zqcp-hwmon`, EC fan tachometers, through DKMS |
+| 12 | Runs `patch/fingerprint/install.sh` or `patch/fingerprint-egismoc/install.sh` depending on the reader — rebuilds `libfprint` with the Goodix `27c6:6f94` id, or installs the SDCP-capable build for the EgisTec ET171 `1c7a:05aa` |
+| 13 | Runs `patch/auto-rebuild/install.sh` — pacman hooks that keep steps 6, 8 and 12 applied across package updates (the Egis build is a separate package, so the hook exits early once it is installed) |
 
-Steps 8 and 9 are skipped with a warning if kernel lockdown or
-`module.sig_enforce=1` would block an unsigned module. Steps 13 and 14 are
+Step 8 is skipped with a warning if kernel lockdown or
+`module.sig_enforce=1` would block an unsigned module. Steps 12 and 13 are
 skipped on non-pacman systems. Step 6 runs before the initramfs rebuild
 because the early-KMS copy of `xe.ko` is the one that lights the panel.
 
@@ -168,8 +166,9 @@ sudo dmesg | grep -iE 'I2C_DEVT|table upgrade'
 ls /sys/bus/acpi/devices/ | grep -iE 'TOPS|FTSC'
 sudo dmesg | grep -iE 'i2c.hid|hid-multitouch'
 
-# keyboard quirk on the cmdline
-grep -o 'i8042.dumbkbd=1' /proc/cmdline
+# keyboard works without i8042.dumbkbd=1 (kernel 7.1.10+), Caps Lock LED is back
+grep -c i8042.dumbkbd /proc/cmdline        # 0
+ls /sys/class/leds | grep capslock
 
 # no phantom KEY_MICMUTE device — must print nothing
 grep -l UNKNOWN /sys/class/input/input*/name | xargs -r grep -H 2808
@@ -192,7 +191,7 @@ fprintd-list "$USER"
 Both kernel-module fixes install into `/usr/lib/modules/$KVER/updates/`, which
 `depmod` searches before `kernel/`, so a package update never overwrites them.
 What it does do is produce a *new* kernel that has no `updates/` entry yet. The
-pacman hooks from step 9 fill that in automatically, and re-apply the
+pacman hooks from step 13 fill that in automatically, and re-apply the
 fingerprint patch after a libfprint update.
 
 Everything else needs nothing: the ACPI override is firmware data, the HID-BPF
@@ -213,7 +212,6 @@ Details and the manual fallback are in
 
 | Limitation | Cause |
 |---|---|
-| **Caps Lock LED stays dark** | `i8042.dumbkbd=1`, needed for the internal keyboard, also disables atkbd's `SET_LEDS` path, so the keyboard comes up without `EV_LED`. An upstream `atkbd` DMI quirk fixes the keyboard without the parameter and brings the LED back; verified on this unit, waiting to be merged. See [`patch/keyboard-atkbd/`](patch/keyboard-atkbd/) |
 | **Fan control is not possible** | the EC owns the fan curve. `SFNS` is gated on an `MFGM` flag no AML path ever sets, and the DPTF `TFN1` cooling device accepts writes that the EC ignores. Both tested, see [`patch/fan/README.md`](patch/fan/README.md) |
 | **Mic-mute LED follows the built-in array only** | the kernel's control-LED group tracks `Dmic0 Capture Switch` and lights the LED only when *every* attached control is muted. Mute the 3.5 mm jack input while it is not the default and the LED does not move. The built-in array is the default, so Fn+F7 works normally. See [`patch/headset-mic/README.md`](patch/headset-mic/README.md) |
 | **Brightness steps are not perceptually uniform** | the desktop divides `max_brightness` linearly, 20 steps of 5% on this panel, so the first step changes the light output far more than the rest. [`patch/oled-backlight/`](patch/oled-backlight/) removes the worst of it by raising the floor, but a perceptual curve has to come from the desktop, and PowerDevil rejected one by design |
@@ -222,28 +220,6 @@ Details and the manual fallback are in
 | **MIPI / IPU6 cameras unconfigured** | no sensor on this SKU |
 | **NFC unusable** | the `NTAG0001` controller sits on I²C-1 and Linux has no driver for it |
 | **Some OEM helper ACPI devices disabled** | `INTC10CC` HID Discovery, `INTC10DF` TSE and similar are disabled by firmware and are not needed for any user-visible function |
-
-### Recovering the Caps Lock LED
-
-Caps Lock itself works correctly as a modifier; only the LED is dark. If you
-want to try getting it back:
-
-1. Reboot. At the Limine menu, press `e` on the kernel entry.
-2. In the `cmdline:` line, strip ` i8042.dumbkbd=1`.
-3. Boot (F10 or Enter). Plug in an external USB keyboard first as a
-   fallback in case the internal one misbehaves.
-4. Use the internal keyboard for a few minutes. If you see no key
-   repeats, no dropouts, and Caps Lock LED works — the quirk is no
-   longer needed on your firmware revision; remove the parameter from
-   `/etc/default/limine` permanently. If you do see misbehaviour, try
-   replacing `i8042.dumbkbd=1` with `i8042.nomux=1` (a softer quirk
-   that disables only mux probing, leaving the LED path intact). If
-   neither works, keep `i8042.dumbkbd=1` — Caps Lock LED stays as
-   collateral damage of the keyboard fix.
-
-There is no EC-side Caps Lock LED field in this BIOS (none of `CAPL`,
-`CAPS`, `CapsLed`, `KBLE` appear in the disassembled DSDT), so the LED
-is keyboard-internal and only the PS/2 `SET_LEDS` command can drive it.
 
 ---
 
@@ -339,11 +315,13 @@ which BIOS device you're chasing. For example, in our case Linux saw a
 
 ## Other bootloaders
 
-`apply_patch.sh` writes the kernel cmdline edit to `/etc/default/limine`. If
-you use another bootloader, do the same thing in its config:
+`apply_patch.sh` writes its kernel cmdline edits to `/etc/default/limine`:
+`xe.vbt_firmware=` from the OLED fix and, on kernels older than 7.1.10 only,
+`i8042.dumbkbd=1`. If you use another bootloader, do the same thing in its
+config:
 
 - **systemd-boot**: edit the `options` line in your
-  `/boot/loader/entries/*.conf` to include ` i8042.dumbkbd=1`.
+  `/boot/loader/entries/*.conf`.
 - **GRUB**: append to `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`,
   then `sudo grub-mkconfig -o /boot/grub/grub.cfg`.
 - **rEFInd**: append to the matching `options` line in `refind.conf`.
@@ -367,13 +345,10 @@ HONOR_ZQC-P_M1010/
 ├── uninstall_patch.sh              # revert installer
 ├── patch/                          # one self-contained directory per fix
 │   ├── README.md                   # index + status table
-│   ├── acpi-override/              # patched SSDT27 — touchpad, touchscreen, keyboard
+│   ├── acpi-override/              # patched SSDT27 — touchpad, touchscreen
 │   │   ├── SSDT27_TPD0.aml         #   ready-to-install ACPI override (binary)
 │   │   ├── SSDT27_TPD0.dsl         #   human-readable source
 │   │   └── acpi_override.install   #   mkinitcpio install hook (early CPIO)
-│   ├── keyboard-atkbd/             # upstream quirk, reference only, needs a kernel rebuild
-│   │   ├── 0001-Input-atkbd-skip-deactivate-for-HONOR-ZQC-P.patch
-│   │   └── README.md
 │   ├── auto-rebuild/               # pacman hooks: keep fixes applied across updates
 │   │   ├── rebuild.sh              #   dispatcher, installed to /usr/local/lib/honor-zqcp/
 │   │   ├── 95-honor-zqcp-kernel-modules.hook
@@ -396,9 +371,6 @@ HONOR_ZQC-P_M1010/
 │   ├── headset-mic/                # ALC256 quirk for PCI SSID 1ee7:209d
 │   │   ├── alc269-honor-zqc-p-m1010.patch
 │   │   └── install.sh              #   build+install snd-hda-codec-alc269.ko
-│   ├── sof-audio/                  # preventive IPC4 backport (PR #5762)
-│   │   ├── 0001-ASoC-SOF-ipc4-topology-Refresh-copier-IPC-payload-before-widget-setup.patch
-│   │   └── install.sh              #   build+install snd-sof.ko (updates/ overlay)
 │   ├── fingerprint/                # Goodix 27c6:6f94 in libfprint
 │   │   ├── libfprint-goodixmoc-honor-zqc-p-6f94.patch
 │   │   ├── PKGBUILD                #   pacman-owned rebuild, avoids file conflicts
@@ -493,8 +465,8 @@ on `linux-cachyos 7.0.8` (Panther Lake-aware) under CachyOS.
 |---|---|---|---|
 | **Touchpad — Goodix TOPS0102** | ACPI `\_SB.PC00.I2C1.TPD0` → `i2c-TOPS0102:00`, `i2c_hid_acpi` + `hid-multitouch` (HID `27C6:0F9A`) | `\_SB.PC00.I2C1.TPD0`, `hidi2c.inf` (HID I²C Device) | ✅ *needs this patch* |
 | **Touchscreen — FocalTech FTSC1000** | ACPI `\_SB.PC00.I2C2.TPL1` → `i2c-FTSC1000:00`, `i2c_hid_acpi` + `hid-multitouch` (HID `2808:5662`) | `\_SB.PC00.I2C2.TPL1`, `hidi2c.inf` (HID I²C Device) | ✅ *needs this patch* |
-| **Built-in keyboard** | ACPI `MSFT0001`/`PNP0303` → `i8042`, "AT Translated Set 2 keyboard" | Microsoft PS/2 Keyboard | ✅ *needs `i8042.dumbkbd=1`* |
-| Caps Lock LED | (keyboard-internal, driven via atkbd `SET_LEDS`) | (same) | ❌ *blocked by `i8042.dumbkbd=1` — see [Known limitations](#known-limitations)* |
+| **Built-in keyboard** | ACPI `MSFT0001`/`PNP0303` → `i8042`, "AT Translated Set 2 keyboard" | Microsoft PS/2 Keyboard | ✅ *works out of the box on kernel 7.1.10+ (`atkbd` DMI quirk); older kernels need `i8042.dumbkbd=1`* |
+| Caps Lock LED | (keyboard-internal, driven via atkbd `SET_LEDS`) | (same) | ✅ *on kernel 7.1.10+; dark on older kernels, where `i8042.dumbkbd=1` disables `SET_LEDS`* |
 | Hotkey / function-key WMI | `huawei_wmi`, "Huawei WMI hotkeys" input | Huawei PC Manager hotkey driver | ✅ |
 | **Touchpad edge slide, right (volume)** | touchpad → EC → i8042 → `atkbd`, `KEY_VOLUMEUP/DOWN` on the internal keyboard device | HONOR PC Manager | ✅ works out of the box |
 | **Touchpad edge slide, left (brightness)** | vendor HID collection `0xff00`, report `0x0e`, ignored by `hid-input` | HONOR PC Manager | ✅ *needs this patch* — see [`patch/touchpad-edge/`](patch/touchpad-edge/) |
@@ -507,7 +479,7 @@ on `linux-cachyos 7.0.8` (Panther Lake-aware) under CachyOS.
 
 | Component | Linux identifier / driver | Windows identifier / driver | Status |
 |---|---|---|---|
-| HD-Audio + DSP (SOF) | PCI `8086:e428`, `sof-audio-pci-intel-ptl`, card `sofhdadsp` (HDA Analog + 3× HDMI) | Realtek HD Audio + Intel SST | ✅ *needs this patch* — see [`patch/sof-audio/`](patch/sof-audio/) (suspend/resume reliability) |
+| HD-Audio + DSP (SOF) | PCI `8086:e428`, `sof-audio-pci-intel-ptl`, card `sofhdadsp` (HDA Analog + 3× HDMI) | Realtek HD Audio + Intel SST | ✅ *works out of the box*; the IPC4 suspend/resume fix (thesofproject/sof#10700) is in the kernel since 7.1.10 |
 | Phantom `KEY_MICMUTE` | the FTSC1000 touchscreen's `0xff01` vendor collection, which `hid-input` maps to `KEY_MICMUTE` | none, a FocalTech driver claims the collection | ✅ *needs this patch* — see [`patch/micmute/`](patch/micmute/); without it the mic mutes itself |
 | Speakers / headphone jack | ALSA `sof-hda-dsp Headphone` | (same as above) | ✅ |
 | Microphone array (DMIC) | SOF DMIC capture, `HiFi__Mic1__source` (4ch) | Intel Smart Sound DMIC | ✅ |

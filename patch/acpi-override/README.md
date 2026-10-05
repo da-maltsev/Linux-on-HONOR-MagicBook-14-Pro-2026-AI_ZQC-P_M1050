@@ -60,9 +60,11 @@ then adds `acpi_override` to `HOOKS=` in `/etc/mkinitcpio.conf` (right after
 `autodetect`) and regenerates the initramfs. The kernel loads the override table
 early, before the ACPI namespace is built.
 
-It also appends **`i8042.dumbkbd=1`** to the kernel command line, which the
-internal keyboard needs. That has one known side effect: it disables atkbd's
-`SET_LEDS` path, so the **Caps Lock LED stays dark**. The keyboard itself works.
+The internal keyboard needs nothing on kernel 7.1.10 and newer: `atkbd.c`
+carries an `atkbd_deactivate_fixup` DMI quirk for `HONOR / ZQC-P`. On older
+kernels `apply_patch.sh` appends **`i8042.dumbkbd=1`** to the kernel command
+line instead, which keeps the keyboard working but disables atkbd's
+`SET_LEDS` path, so the Caps Lock LED stays dark there.
 
 `uninstall_patch.sh` reverts all of it.
 

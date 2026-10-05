@@ -12,7 +12,7 @@ kernel 7.1.5.
 
 | Area | Status | Fix |
 |---|---|---|
-| Touchpad, touchscreen, internal keyboard | works | [`acpi-override/`](acpi-override/) — patched SSDT27 plus `i8042.dumbkbd=1`. **Prerequisite for a usable machine** |
+| Touchpad, touchscreen | works | [`acpi-override/`](acpi-override/) — patched SSDT27. **Prerequisite for a usable machine** |
 | Microphone mutes itself, mic-mute LED flickers | works | [`micmute/`](micmute/) — HID-BPF fixup for the touchscreen's vendor collection |
 | Fingerprint reader, Goodix `27c6:6f94` | works | [`fingerprint/`](fingerprint/) — two-line `libfprint` id patch |
 | Fingerprint reader, EgisTec `1c7a:05aa` (Ultra 5 338H) | works | [`fingerprint-egismoc/`](fingerprint-egismoc/) — SDCP-capable `libfprint` build with an ET171 init skip |
@@ -22,9 +22,9 @@ kernel 7.1.5.
 | Garbled screen at boot on 7.1.6+ | works, opt-in | [`cdclk-ptl/`](cdclk-ptl/) — rebuilds `xe.ko` with the unmerged upstream CDCLK fix for Panther Lake |
 | Fan RPM readout | works | [`fan/`](fan/) — `honor-zqcp-hwmon` module |
 | Fan control | not available | [`fan/README.md`](fan/README.md) — every OS-side path was tested, the EC ignores all of them |
-| SOF DSP suspend/resume panic | preventive | [`sof-audio/`](sof-audio/) — upstream IPC4 backport; the race never reproduced on this unit |
 | Fixes reverted by package updates | handled | [`auto-rebuild/`](auto-rebuild/) — pacman hooks that rebuild them automatically |
-| Internal keyboard, Caps Lock LED | upstream pending | [`keyboard-atkbd/`](keyboard-atkbd/) — an `atkbd` DMI quirk replaces `i8042.dumbkbd=1` and restores the LED; verified here, needs a kernel rebuild until merged |
+| Internal keyboard, Caps Lock LED | works out of the box on 7.1.10+ | in-tree `atkbd` DMI quirk for ZQC-P; older kernels need `i8042.dumbkbd=1` (no Caps Lock LED), which `apply_patch.sh` adds only there |
+| SOF DSP suspend/resume panic | works out of the box on 7.1.10+ | the IPC4 copier-payload refresh (thesofproject/sof#10700) is in the kernel |
 
 ## Installing
 
@@ -59,18 +59,17 @@ hand. `apply_patch.sh` installs it as its last step.
 | `oled-backlight/` | nothing on a kernel update; a **BIOS** update invalidates the blob | re-run `install.sh` |
 | `fan/` | rebuilt automatically | DKMS |
 | `headset-mic/` | a kernel update leaves the new kernel without the overlay | `auto-rebuild/` hook |
-| `sof-audio/` | same | `auto-rebuild/` hook |
 | `fingerprint/` | a libfprint update replaces the patched package | `auto-rebuild/` hook |
 | `fingerprint-egismoc/` | nothing — it is a separate package in a private libdir, independent of the system libfprint | — (hook re-runs exit early) |
 | `cdclk-ptl/` | a kernel update leaves the new kernel without the overlay | `auto-rebuild/` hook |
 
-Without the hooks, re-run `headset-mic/install.sh` and `sof-audio/install.sh`
-after every kernel update, and `fingerprint/install.sh` after every libfprint
+Without the hooks, re-run `headset-mic/install.sh` (and `cdclk-ptl/install.sh`,
+if used) after every kernel update, and `fingerprint/install.sh` after every libfprint
 update.
 
 On a rolling distribution you will regularly have a kernel installed but not
 yet booted, at which point the running kernel's headers no longer exist and
-nothing can build. `fan/`, `headset-mic/` and `sof-audio/` accept a `KVER`
+nothing can build. `fan/`, `headset-mic/` and `cdclk-ptl/` accept a `KVER`
 override to pre-build for the installed kernel instead:
 
 ```sh

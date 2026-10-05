@@ -25,7 +25,7 @@ die()  { printf '\033[1;31m==>\033[0m %s\n' "$*" >&2; exit 1; }
 command -v pacman >/dev/null \
     || die "This machine does not use pacman. The hooks only work on Arch-like
     systems; on others, re-run the installers in patch/headset-mic/ and
-    patch/sof-audio/ after each kernel update by hand."
+    patch/cdclk-ptl/ after each kernel update by hand."
 
 [[ -d "${REPO}/patch" ]] || die "cannot locate the repository from ${SCRIPT_DIR}"
 
@@ -66,8 +66,8 @@ cat <<EOF
   ${LIB_DIR}/deferred.sh
   ${CONF}
 
-  From now on a kernel update rebuilds patch/headset-mic/,
-  patch/sof-audio/ and patch/cdclk-ptl/ for the new kernel automatically,
+  From now on a kernel update rebuilds patch/headset-mic/ and
+  patch/cdclk-ptl/ for the new kernel automatically,
   and a libfprint update re-applies patch/fingerprint/ shortly after the
   transaction.
 
