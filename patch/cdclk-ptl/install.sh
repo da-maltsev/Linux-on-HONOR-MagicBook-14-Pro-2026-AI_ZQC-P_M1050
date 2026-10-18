@@ -149,7 +149,29 @@ cd "$SRCDIR"
 
 # --- 4. patch -----------------------------------------------------------------
 if patch -Np1 -R --dry-run --silent < "$PATCH_FILE" >/dev/null 2>&1; then
-    log "fix already present in the source tree"
+    # Upstream already carries the fix, so the stock xe.ko is all that is
+    # needed. Building anyway only swaps the distro's module for one rebuilt
+    # from a vanilla tree, which on linux-omarchy (patched drm/) leaves the
+    # panel black at boot. Drop any overlay left from an earlier kernel.
+    log "fix already present in the source tree, the stock xe.ko is enough"
+    cd / && rm -rf "$WORKDIR"
+    if [[ -e "${MODDIR}/updates/xe.ko.zst" ]]; then
+        rm -f "${MODDIR}/updates/xe.ko.zst"
+        depmod "$KVER"
+        log "removed the stale updates/xe.ko.zst overlay"
+        # The overlay is also in the boot image, so it has to be rebuilt.
+        # Under REGEN=0 the caller does that on exit 0.
+        if [[ "$REGEN" == "1" ]]; then
+            if command -v limine-mkinitcpio >/dev/null; then
+                limine-mkinitcpio
+            else
+                /usr/bin/mkinitcpio -P
+                command -v limine-update >/dev/null && limine-update
+            fi
+        fi
+        exit 0
+    fi
+    exit 3
 elif patch -Np1 --dry-run --silent < "$PATCH_FILE" >/dev/null 2>&1; then
     log "applying the cdclk fix"
     patch -Np1 < "$PATCH_FILE"
