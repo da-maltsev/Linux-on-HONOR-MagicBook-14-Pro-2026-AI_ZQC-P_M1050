@@ -69,11 +69,16 @@ log "jobs    = $JOBS"
 # --- 2. toolchain -------------------------------------------------------------
 # The module has to be built with the same compiler family as the kernel,
 # otherwise the LTO objects do not match.
+#
+# The target's own config comes first: /proc/config.gz is the running
+# kernel's, and building for another kernel with it pulls in options the
+# target lacks (e.g. UBSAN on linux-omarchy), so modpost fails on symbols
+# like __ubsan_handle_out_of_bounds.
 CONFIG_SRC=""
-if [[ -r /proc/config.gz ]]; then
-    CONFIG_SRC="/proc/config.gz"
-elif [[ -r "${MODDIR}/build/.config" ]]; then
+if [[ -r "${MODDIR}/build/.config" ]]; then
     CONFIG_SRC="${MODDIR}/build/.config"
+elif [[ "$KVER" == "$(uname -r)" && -r /proc/config.gz ]]; then
+    CONFIG_SRC="/proc/config.gz"
 else
     die "no kernel config available (need /proc/config.gz or ${MODDIR}/build/.config)"
 fi
