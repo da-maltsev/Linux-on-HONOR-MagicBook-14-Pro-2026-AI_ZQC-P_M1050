@@ -213,8 +213,14 @@ gen_module_btf() {
         warn "pahole not found, the module will be built without BTF"
         return 0
     fi
-    if [[ ! -r /sys/kernel/btf/vmlinux ]]; then
-        warn "/sys/kernel/btf/vmlinux missing, the module will be built without BTF"
+    # The base BTF must be the target kernel's. /sys/kernel/btf/vmlinux is the
+    # running kernel's, so when the pacman hook builds for a freshly installed
+    # kernel the module gets a base that the new kernel rejects with -EINVAL
+    # and xe never loads. The headers ship the target's vmlinux, use that.
+    local base=/sys/kernel/btf/vmlinux
+    [[ "$KVER" == "$(uname -r)" ]] || base="${MODDIR}/build/vmlinux"
+    if [[ ! -r "$base" ]]; then
+        warn "${base} missing, the module will be built without BTF"
         return 0
     fi
     if [[ ! -f "$genbtf" || ! -x "$resolve" ]]; then
@@ -246,14 +252,14 @@ gen_module_btf() {
     else export OBJCOPY="objcopy"; fi
 
     log "generating module BTF the way the kernel does (pahole ${pver:-?})"
-    bash "$genbtf" --btf_base /sys/kernel/btf/vmlinux "$ko" \
+    bash "$genbtf" --btf_base "$base" "$ko" \
         || { warn "BTF generation failed, continuing without it"; return 0; }
 
     # The kernel rejects a module outright when its .BTF is invalid, so
     # verify before installing: the BTF must parse with no consistency
     # errors. If it does not, drop the BTF sections — a BTF-less module
     # loads fine.
-    if ! pahole -F dwarf --btf_base /sys/kernel/btf/vmlinux "$ko" \
+    if ! pahole -F dwarf --btf_base "$base" "$ko" \
             >/dev/null 2>"${WORKDIR}/btfcheck.err"; then
         if grep -qE 'is not FUNC_PROTO|has no btf type information|Failed to load BTF' \
                 "${WORKDIR}/btfcheck.err"; then
